@@ -39,7 +39,6 @@ uv run scripts/qloo_probe.py
 | Hackathon | What it uses here |
 |---|---|
 | Amazon Developer, Alexa+ track | `src/kin/mcp_server.py` |
-| AWS CDS Agentic AI | WhatsApp, SMS and SES channels (planned) |
 | Qloo Agentic | `src/kin/qloo.py`, `src/kin/reminiscence.py` |
 
 Kin is not a medical device and does not give medical advice.
