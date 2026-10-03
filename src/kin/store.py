@@ -9,13 +9,20 @@ from __future__ import annotations
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
+TABLES = ("checkins", "doses", "alerts", "moments")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def local_date(stamp: str) -> date:
+    return datetime.fromisoformat(stamp).astimezone().date()
 
 
 class Store:
@@ -24,10 +31,14 @@ class Store:
         self._lock = threading.Lock()
         if not self.path.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._write({"people": {}, "checkins": [], "doses": [], "alerts": []})
+            self._write({})
 
     def _read(self) -> dict[str, Any]:
-        return json.loads(self.path.read_text())
+        data = json.loads(self.path.read_text())
+        data.setdefault("people", {})
+        for table in TABLES:
+            data.setdefault(table, [])
+        return data
 
     def _write(self, data: dict[str, Any]) -> None:
         tmp = self.path.with_suffix(".tmp")
@@ -37,7 +48,7 @@ class Store:
     def _append(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             data = self._read()
-            row = {"at": _now(), **row}
+            row = {"at": row.pop("at", None) or _now(), **row}
             data[table].append(row)
             self._write(data)
             return row
@@ -53,14 +64,24 @@ class Store:
     def get_person(self, person_id: str) -> dict[str, Any] | None:
         return self._read()["people"].get(person_id)
 
-    def add_checkin(self, person_id: str, mood: int, notes: str = "") -> dict[str, Any]:
-        return self._append("checkins", {"person_id": person_id, "mood": mood, "notes": notes})
+    def list_people(self) -> list[dict[str, Any]]:
+        return list(self._read()["people"].values())
 
-    def add_dose(self, person_id: str, medication: str, taken: bool) -> dict[str, Any]:
-        return self._append("doses", {"person_id": person_id, "medication": medication, "taken": taken})
+    def add_checkin(self, person_id: str, mood: int, notes: str = "", at: str | None = None) -> dict[str, Any]:
+        return self._append("checkins", {"person_id": person_id, "mood": mood, "notes": notes, "at": at})
 
-    def add_alert(self, person_id: str, level: str, reason: str) -> dict[str, Any]:
-        return self._append("alerts", {"person_id": person_id, "level": level, "reason": reason})
+    def add_dose(self, person_id: str, medication: str, taken: bool, at: str | None = None) -> dict[str, Any]:
+        return self._append("doses", {"person_id": person_id, "medication": medication, "taken": taken, "at": at})
+
+    def add_alert(self, person_id: str, level: str, reason: str, at: str | None = None) -> dict[str, Any]:
+        return self._append("alerts", {"person_id": person_id, "level": level, "reason": reason, "at": at})
+
+    def add_moment(self, person_id: str, topic: str, items: list[str], at: str | None = None) -> dict[str, Any]:
+        return self._append("moments", {"person_id": person_id, "topic": topic, "items": items, "at": at})
+
+    def today(self, table: str, person_id: str) -> list[dict[str, Any]]:
+        today = date.today()
+        return [r for r in self._read()[table] if r["person_id"] == person_id and local_date(r["at"]) == today]
 
     def recent(self, table: str, person_id: str, limit: int = 20) -> list[dict[str, Any]]:
         rows = [r for r in self._read()[table] if r["person_id"] == person_id]
