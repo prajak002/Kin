@@ -12,6 +12,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
+from . import conditions
 from .notify import notify_family
 from .reminiscence import Person, build_set
 from .store import local_date, open_store
@@ -57,8 +58,10 @@ def register_person(
     language: str | None = None,
     favourites: list[str] | None = None,
     medications: list[str] | None = None,
+    lives_in: str | None = None,
 ) -> dict:
-    """Create or update the profile of the person Kin looks after."""
+    """Create or update the profile of the person Kin looks after. hometown is where
+    they grew up; lives_in is the town they live in now, if different."""
     return store.upsert_person(
         person_id,
         name=name,
@@ -67,6 +70,7 @@ def register_person(
         language=language,
         favourites=favourites or [],
         medications=medications or [],
+        lives_in=lives_in or hometown,
     )
 
 
@@ -138,6 +142,17 @@ async def start_reminiscence(person_id: str, take: int = 6) -> dict:
     picks += [m["name"] for m in result["music"][:2]]
     store.add_moment(person_id, "reminiscence", [p for p in dict.fromkeys(picks) if p])
     return result
+
+
+@server.tool()
+async def local_conditions(person_id: str) -> dict:
+    """Today's weather and air quality where the person lives, with plain advice
+    (heat, cold, poor air, strong sun, rain) to pass on gently."""
+    person = _require_person(person_id)
+    try:
+        return await conditions.local_conditions(person.get("lives_in") or person["hometown"])
+    except (ValueError, httpx.HTTPError) as e:
+        raise ToolError(f"Weather is unavailable right now ({e}).") from e
 
 
 @server.tool()
