@@ -427,3 +427,31 @@ def test_daily_cron_digest(tmp_path, monkeypatch):
     asha = next(t for pid, _, t in sent if pid == "asha")
     assert "No check-in today" in asha and "39°C" in asha
     assert mcp_server.store.recent("alerts", "asha")[-1]["reason"] == "No check-in from Asha today."
+
+
+def test_memory_store_and_vector(tmp_path, monkeypatch):
+    from kin import mcp_server
+    from kin.memory import VectorMemory
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    monkeypatch.delenv("UPSTASH_VECTOR_REST_URL", raising=False)
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+    mcp_server.save_memory("asha", "Her husband Arun was a schoolteacher in Shillong.")
+    mcp_server.save_memory("asha", "She sang Rabindra Sangeet at her sister's wedding.")
+    hits = mcp_server.search_memories("asha", "Tell me about Arun")
+    assert hits[0]["fact"].startswith("Her husband Arun")
+
+    calls = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        calls.append((request.url.path, body))
+        if request.url.path == "/query-data":
+            return httpx.Response(200, json={"result": [{"score": 0.91, "metadata": {"person_id": "asha", "fact": "x"}}]})
+        return httpx.Response(200, json={"result": "Success"})
+
+    vm = VectorMemory("https://vector.test", "t", transport=httpx.MockTransport(handler))
+    vm.remember("asha", "Lived in Shillong")
+    assert vm.recall("asha", "hills")[0]["score"] == 0.91
+    assert calls[0][1][0]["data"] == "Lived in Shillong"
+    assert calls[1][1]["filter"] == "person_id = 'asha'"

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-TABLES = ("checkins", "doses", "alerts", "moments", "traces")
+TABLES = ("checkins", "doses", "alerts", "moments", "traces", "memories")
 MAX_TRACES = 500
 
 

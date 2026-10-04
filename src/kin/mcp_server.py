@@ -12,7 +12,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
-from . import conditions
+from . import conditions, memory
 from .notify import notify_family
 from .reminiscence import Person, build_set
 from .store import local_date, open_store
@@ -142,6 +142,24 @@ async def start_reminiscence(person_id: str, take: int = 6) -> dict:
     picks += [m["name"] for m in result["music"][:2]]
     store.add_moment(person_id, "reminiscence", [p for p in dict.fromkeys(picks) if p])
     return result
+
+
+@server.tool()
+def save_memory(person_id: str, fact: str) -> dict:
+    """WRITE a new life detail to long-term memory. Call this whenever the person
+    tells you about someone by name, a place they lived or worked, or an event in
+    their life. fact: one short sentence in English, e.g. "Her husband Arun was a
+    schoolteacher in Shillong." Without this, it is forgotten after today."""
+    _require_person(person_id)
+    return memory.open_memory(store).remember(person_id, fact.strip())
+
+
+@server.tool()
+def search_memories(person_id: str, about: str) -> list[dict]:
+    """READ details the person shared in earlier conversations about a topic, person
+    or place. Use when they ask "do you remember…" or bring up someone again."""
+    _require_person(person_id)
+    return memory.open_memory(store).recall(person_id, about)
 
 
 @server.tool()
