@@ -1,6 +1,12 @@
-.venv
-.kin
+# Never upload secrets or local data
 .env
+.env.*
+!.env.example
+.kin
+.venv
+.pytest_cache
+**/__pycache__
 web/node_modules
 web/.next
-**/__pycache__
+tests
+scripts
