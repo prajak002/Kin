@@ -1,0 +1,26 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "web",
+      "bindings": [
+        { "type": "service", "service": "backend", "format": "url", "env": "KIN_BACKEND_URL" }
+      ]
+    },
+    "backend": {
+      "root": ".",
+      "entrypoint": "main:app",
+      "functions": {
+        "main.py": {
+          "maxDuration": 120,
+          "excludeFiles": "{web/**,tests/**,scripts/**,.kin/**,.venv/**,**/__pycache__/**}"
+        }
+      }
+    }
+  },
+  "rewrites": [
+    { "source": "/mcp", "destination": { "service": "backend" } },
+    { "source": "/telegram", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "web" } }
+  ]
+}

@@ -7,6 +7,8 @@ import { AlertBadge, Card, Offline } from "@/components/ui";
 import { age, dayKey, timeAgo } from "@/lib/format";
 import { KinOffline, getPerson, wellbeing, type Summary } from "@/lib/kin";
 
+import { FamilyContacts } from "./family";
+
 function moodDays(summary: Summary): MoodDay[] {
   return Array.from({ length: 7 }, (_, i) => {
     const date = new Date();
@@ -106,6 +108,17 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
           </dl>
         </Card>
       </div>
+
+      <Card>
+        <h2 className="font-display text-xl">Who Kin tells</h2>
+        <p className="mb-4 text-sm text-ink-3">Alerts go to everyone here as soon as Kin flags something.</p>
+        <FamilyContacts
+          personId={person.id}
+          personName={person.name}
+          contacts={person.family ?? []}
+          telegramBot={process.env.KIN_TELEGRAM_BOT_USERNAME}
+        />
+      </Card>
 
       <Card>
         <h2 className="font-display text-xl">This week</h2>

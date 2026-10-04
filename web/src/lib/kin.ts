@@ -5,8 +5,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 // The dashboard reads Kin's data through the same MCP server Alexa+ uses.
-const MCP_URL = process.env.KIN_MCP_URL || "http://127.0.0.1:8000/mcp";
-const AGENT_URL = process.env.KIN_AGENT_URL || "http://127.0.0.1:8080/invocations";
+// On Vercel, KIN_BACKEND_URL is the Python service's private binding.
+const backend = (path: string) => process.env.KIN_BACKEND_URL && new URL(path, process.env.KIN_BACKEND_URL).toString();
+const MCP_URL = backend("/mcp") || process.env.KIN_MCP_URL || "http://127.0.0.1:8000/mcp";
+const AGENT_URL = backend("/invocations") || process.env.KIN_AGENT_URL || "http://127.0.0.1:8080/invocations";
+
+export type Contact = { name: string; relation: string; channel: "whatsapp" | "telegram" | "ntfy"; address: string };
 
 export type Person = {
   id: string;
@@ -16,6 +20,7 @@ export type Person = {
   language?: string | null;
   favourites: string[];
   medications: string[];
+  family: Contact[];
 };
 
 export type Checkin = { at: string; mood: number; notes: string };
@@ -35,10 +40,14 @@ export type Summary = {
 
 export class KinOffline extends Error {}
 
+// Shared secret for the Python backend's /mcp and /invocations (unset locally).
+const authHeaders = (): Record<string, string> =>
+  process.env.KIN_API_TOKEN ? { Authorization: `Bearer ${process.env.KIN_API_TOKEN}` } : {};
+
 async function callTool<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
   const client = new Client({ name: "kin-web", version: "0.1.0" });
   try {
-    await client.connect(new StreamableHTTPClientTransport(new URL(MCP_URL)));
+    await client.connect(new StreamableHTTPClientTransport(new URL(MCP_URL), { requestInit: { headers: authHeaders() } }));
   } catch (e) {
     throw new KinOffline(`Kin's MCP server is not reachable at ${MCP_URL}`, { cause: e });
   }
@@ -62,6 +71,12 @@ export const getPerson = async (id: string) => (await listPeople()).find((p) => 
 export const wellbeing = (personId: string, days = 7) =>
   callTool<Summary>("wellbeing_summary", { person_id: personId, days });
 
+export const addContact = (personId: string, c: Contact) =>
+  callTool<Person>("add_family_contact", { person_id: personId, ...c });
+
+export const removeContact = (personId: string, channel: string, address: string) =>
+  callTool<Person>("remove_family_contact", { person_id: personId, channel, address });
+
 export async function askKin(prompt: string, personId: string, sessionId: string): Promise<string> {
   let res: Response;
   try {
@@ -69,6 +84,7 @@ export async function askKin(prompt: string, personId: string, sessionId: string
       method: "POST",
       headers: {
         "content-type": "application/json",
+        ...authHeaders(),
         // AgentCore's session header: the agent keeps one conversation per session.
         "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": sessionId,
       },

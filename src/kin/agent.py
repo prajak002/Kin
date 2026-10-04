@@ -21,6 +21,8 @@ from strands import Agent
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.tools.mcp import MCPClient
+from strands.tools.tools import PythonAgentTool
+from strands.types.tools import ToolResult, ToolUse
 
 load_dotenv()
 
@@ -96,13 +98,43 @@ def build_model():
     raise ValueError(f"Unknown KIN_MODEL_PROVIDER '{PROVIDER}' (use ollama, openai or bedrock).")
 
 
-def build_agent(person_id: str, tools: MCPClient | None = None, quiet: bool = False) -> Agent:
+async def inprocess_tools() -> list[PythonAgentTool]:
+    """Kin's MCP tools called directly in this process: same schemas and checks as
+    over MCP, without a server round trip. Used where a subprocess per request
+    would be too slow (serverless)."""
+    from .mcp_server import server
+
+    def wrap(name: str):
+        async def run(tool_use: ToolUse, **_: object) -> ToolResult:
+            try:
+                result = await server.call_tool(name, tool_use["input"])
+                text = "\n".join(c.text for c in result.content if getattr(c, "text", None))
+                status = "error" if result.is_error else "success"
+            except Exception as e:  # ToolError and validation errors reach the model
+                text, status = str(e), "error"
+            return {"toolUseId": tool_use["toolUseId"], "status": status, "content": [{"text": text}]}
+
+        return run
+
+    return [
+        PythonAgentTool(t.name, {"name": t.name, "description": t.description or "", "inputSchema": {"json": t.input_schema}}, wrap(t.name))
+        for t in await server.list_tools()
+    ]
+
+
+def build_agent(
+    person_id: str,
+    tools: MCPClient | list | None = None,
+    quiet: bool = False,
+    messages: list | None = None,
+) -> Agent:
     model = build_model()
     # quiet: no streamed output (which would include the model's reasoning).
     kwargs = {"callback_handler": None} if quiet else {}
     return Agent(
         model=model,
-        tools=[tools or mcp_client()],
+        tools=tools if isinstance(tools, list) else [tools or mcp_client()],
+        messages=messages,
         system_prompt=SYSTEM_PROMPT.format(person_id=person_id, today=date.today().isoformat()),
         # Free-tier hosts cap tokens per minute; the last ~10 exchanges are enough for a chat.
         conversation_manager=SlidingWindowConversationManager(window_size=int(os.environ.get("KIN_HISTORY", "20"))),

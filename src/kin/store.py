@@ -88,7 +88,12 @@ class Store:
 
 
 def open_store():
-    """DynamoDB when KIN_TABLE is set (deployed), the local JSON file otherwise."""
+    """Redis when Upstash is configured (Vercel), DynamoDB when KIN_TABLE is set (AWS),
+    the local JSON file otherwise."""
+    from .redis_store import RedisStore, redis_configured
+
+    if redis_configured():
+        return RedisStore()
     if os.environ.get("KIN_TABLE"):
         from .dynamo import DynamoStore
 

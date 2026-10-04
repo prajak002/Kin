@@ -121,3 +121,147 @@ def test_dynamo_store_matches_json_store(monkeypatch):
         assert store.recent("doses", "asha")[0]["taken"] is False
         assert store.recent("moments", "asha")[0]["items"] == ["Pather Panchali"]
         assert [p["id"] for p in store.list_people()] == ["asha"]
+
+
+def test_alerts_reach_every_family_channel(tmp_path, monkeypatch):
+    from kin import mcp_server
+
+    sent = []
+
+    def fake_post(url, **kw):
+        sent.append((url, kw.get("json"), kw.get("headers", {})))
+        return httpx.Response(200, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    monkeypatch.setenv("KIN_TELEGRAM_BOT_TOKEN", "tg-token")
+    monkeypatch.setenv("KIN_WHATSAPP_TOKEN", "wa-token")
+    monkeypatch.setenv("KIN_WHATSAPP_PHONE_ID", "123")
+    monkeypatch.setenv("KIN_WHATSAPP_TEMPLATE", "kin_alert")
+    monkeypatch.delenv("KIN_NTFY_TOPIC", raising=False)
+
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+    mcp_server.add_family_contact("asha", "Ravi", "whatsapp", "+91 98765 43210", "son")
+    mcp_server.add_family_contact("asha", "Mira", "telegram", "555")
+    mcp_server.add_family_contact("asha", "Mira", "telegram", "555", "daughter")  # update, not duplicate
+    alert = mcp_server.alert_family("asha", "Fell in the bathroom", "urgent")
+
+    assert [r["ok"] for r in alert["notified"]] == [True, True]
+    wa = next(s for s in sent if "graph.facebook.com" in s[0])
+    assert wa[0].endswith("/123/messages") and wa[1]["to"] == "919876543210"
+    assert wa[1]["template"]["components"][0]["parameters"][1]["text"] == "Fell in the bathroom"
+    tg = next(s for s in sent if "api.telegram.org/bottg-token" in s[0])
+    assert tg[1]["chat_id"] == "555" and "Urgent" in tg[1]["text"]
+
+    monkeypatch.delenv("KIN_TELEGRAM_BOT_TOKEN")
+    failed = mcp_server.alert_family("asha", "test", "info")["notified"]
+    assert [r["ok"] for r in failed] == [True, False]
+
+    mcp_server.remove_family_contact("asha", "telegram", "555")
+    assert [c["name"] for c in mcp_server.list_people()[0]["family"]] == ["Ravi"]
+
+
+def fake_upstash() -> httpx.MockTransport:
+    """Just enough of Upstash's REST API for RedisStore."""
+    kv: dict = {}
+
+    def run(cmd):
+        op, key, *rest = cmd
+        if op == "SET":
+            kv[key] = rest[0]
+            return "OK"
+        if op == "GET":
+            return kv.get(key)
+        if op == "MGET":
+            return [kv.get(k) for k in [key, *rest]]
+        if op == "SADD":
+            kv.setdefault(key, set()).update(rest)
+            return 1
+        if op == "SMEMBERS":
+            return list(kv.get(key, set()))
+        if op == "RPUSH":
+            kv.setdefault(key, []).extend(rest)
+            return len(kv[key])
+        if op == "LRANGE":
+            rows, start, stop = kv.get(key, []), int(rest[0]), int(rest[1])
+            start = max(len(rows) + start, 0) if start < 0 else start
+            stop = len(rows) + stop if stop < 0 else stop
+            return rows[start:stop + 1]
+        raise AssertionError(op)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if request.url.path == "/pipeline":
+            return httpx.Response(200, json=[{"result": run(c)} for c in body])
+        return httpx.Response(200, json={"result": run(body)})
+
+    return httpx.MockTransport(handler)
+
+
+def test_redis_store_matches_json_store():
+    from kin.redis_store import RedisStore
+
+    store = RedisStore("https://redis.test", "t", transport=fake_upstash())
+    store.upsert_person("asha", name="Asha", birth_year=1948)
+    store.upsert_person("asha", hometown="Kolkata")
+    assert store.get_person("asha")["hometown"] == "Kolkata"
+    assert store.get_person("nobody") is None
+    store.add_checkin("asha", 3, at="2020-01-01T08:00:00+00:00")
+    store.add_checkin("asha", 2, "tired")
+    assert [c["mood"] for c in store.recent("checkins", "asha")] == [3, 2]
+    assert [c["mood"] for c in store.recent("checkins", "asha", limit=1)] == [2]
+    assert [c["mood"] for c in store.today("checkins", "asha")] == [2]
+    assert [p["id"] for p in store.list_people()] == ["asha"]
+    store.save_chat("s1", [{"role": "user", "content": [{"text": "hi"}]}])
+    assert store.load_chat("s1")[0]["role"] == "user" and store.load_chat("s2") == []
+
+
+def test_server_mcp_and_telegram(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+
+    from kin import mcp_server, server
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    monkeypatch.setenv("KIN_TELEGRAM_WEBHOOK_SECRET", "sekret")
+    replies = []
+
+    async def fake_reply(chat_id, text):
+        replies.append((chat_id, text))
+
+    monkeypatch.setattr(server, "_telegram_reply", fake_reply)
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+    mcp_server.daily_checkin("asha", 2, "a bit lonely")
+
+    with TestClient(server.app) as client:
+        assert client.get("/health").json() == {"ok": True}
+        assert client.post("/invocations", json={"prompt": " "}).status_code == 400
+
+        rpc = client.post(
+            "/mcp",
+            headers={"accept": "application/json, text/event-stream"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                  "params": {"name": "wellbeing_summary", "arguments": {"person_id": "asha"}}},
+        )
+        assert rpc.status_code == 200, rpc.text
+        assert '"average_mood": 2' in rpc.json()["result"]["content"][0]["text"]
+
+        monkeypatch.setenv("KIN_API_TOKEN", "tok")
+        call = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+        accept = {"accept": "application/json, text/event-stream"}
+        assert client.post("/mcp", headers=accept, json=call).status_code == 401
+        assert client.post("/mcp", headers={**accept, "authorization": "Bearer tok"}, json=call).status_code == 200
+        assert client.post("/mcp?key=tok", headers=accept, json=call).status_code == 200
+        assert client.get("/health").status_code == 200
+        monkeypatch.delenv("KIN_API_TOKEN")
+
+        def update(text):
+            return {"message": {"text": text, "chat": {"id": 42}, "from": {"first_name": "Ravi"}}}
+
+        assert client.post("/telegram", json=update("/start asha")).status_code == 401
+        hdr = {"X-Telegram-Bot-Api-Secret-Token": "sekret"}
+        client.post("/telegram", headers=hdr, json=update("/start asha"))
+        assert "connected to Asha" in replies[-1][1]
+        assert mcp_server.list_people()[0]["family"][0] == {
+            "name": "Ravi", "relation": "", "channel": "telegram", "address": "42"}
+        client.post("/telegram", headers=hdr, json=update("how is mum?"))
+        assert "Mood: low (a bit lonely)" in replies[-1][1]

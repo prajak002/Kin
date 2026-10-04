@@ -44,7 +44,7 @@ def _require_person(person_id: str) -> dict:
 
 def raise_alert(person: dict, level: str, reason: str) -> dict:
     alert = store.add_alert(person["id"], level, reason)
-    alert["notified"] = notify_family(person["name"], level, reason)
+    alert["notified"] = notify_family(person, level, reason)
     return alert
 
 
@@ -68,6 +68,29 @@ def register_person(
         favourites=favourites or [],
         medications=medications or [],
     )
+
+
+@server.tool()
+def add_family_contact(
+    person_id: str,
+    name: str,
+    channel: Literal["whatsapp", "telegram", "ntfy"],
+    address: Annotated[str, Field(description="WhatsApp: phone with country code; Telegram: chat id; ntfy: topic")],
+    relation: str = "",
+) -> dict:
+    """Add or update a family member who receives Kin's alerts."""
+    person = _require_person(person_id)
+    family = [c for c in person.get("family", []) if not (c["channel"] == channel and c["address"] == address)]
+    family.append({"name": name, "relation": relation, "channel": channel, "address": address})
+    return store.upsert_person(person_id, family=family)
+
+
+@server.tool()
+def remove_family_contact(person_id: str, channel: str, address: str) -> dict:
+    """Stop sending alerts to one family contact."""
+    person = _require_person(person_id)
+    family = [c for c in person.get("family", []) if not (c["channel"] == channel and c["address"] == address)]
+    return store.upsert_person(person_id, family=family)
 
 
 @server.tool()

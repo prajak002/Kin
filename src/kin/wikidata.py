@@ -52,7 +52,9 @@ def _labelled(rows: list[dict[str, str]], key: str) -> list[dict[str, str]]:
 class Wikidata:
     def __init__(self, cache_dir: str | os.PathLike | None = None, transport: httpx.AsyncBaseTransport | None = None):
         self._http = httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, timeout=60, transport=transport)
-        self._cache = Path(cache_dir or os.environ.get("KIN_CACHE", ".kin/cache"))
+        # Serverless hosts only allow writes under /tmp.
+        default = "/tmp/kin-cache" if os.environ.get("VERCEL") else ".kin/cache"
+        self._cache = Path(cache_dir or os.environ.get("KIN_CACHE", default))
         self._cache.mkdir(parents=True, exist_ok=True)
 
     async def __aenter__(self) -> Wikidata:
