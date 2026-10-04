@@ -4,7 +4,12 @@
     "web": {
       "root": "web",
       "bindings": [
-        { "type": "service", "service": "backend", "format": "url", "env": "KIN_BACKEND_URL" }
+        {
+          "type": "service",
+          "service": "backend",
+          "format": "url",
+          "env": "KIN_BACKEND_URL"
+        }
       ]
     },
     "backend": {
@@ -19,8 +24,29 @@
     }
   },
   "rewrites": [
-    { "source": "/mcp", "destination": { "service": "backend" } },
-    { "source": "/telegram", "destination": { "service": "backend" } },
-    { "source": "/(.*)", "destination": { "service": "web" } }
+    {
+      "source": "/mcp",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/telegram",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/whatsapp",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "web"
+      }
+    }
   ]
 }
