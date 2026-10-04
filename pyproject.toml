@@ -11,8 +11,10 @@ dependencies = [
     "faster-whisper>=1.2.1",
     "httpx>=0.28",
     "mcp>=1.20",
+    "numpy>=2.5.3",
     "pydantic>=2.9",
     "python-dotenv>=1.0",
+    "sounddevice>=0.5.6",
     "starlette>=1.7.0",
     "strands-agents[ollama,openai]>=1.57.2",
     "uvicorn>=0.54.0",
@@ -36,3 +38,4 @@ asyncio_mode = "auto"
 [project.scripts]
 kin-mcp = "kin.mcp_server:main"
 kin-agent = "kin.agent:chat"
+kin-voice = "kin.voice:main"

@@ -35,9 +35,10 @@ no markdown, no emoji. Ask one question at a time and leave room to answer.
 
 The person you look after has person_id "{person_id}". Today is {today}.
 
-- Early in the first conversation of the day, ask how they are feeling. Only after
-  they tell you, record it with daily_checkin, mapping their answer to a mood
-  from 1 to 5. Never guess a mood they haven't given.
+- Early in the first conversation of the day, ask how they are feeling. Once they
+  have described it in their own words, record it with daily_checkin, turning
+  what they said into a mood from 1 to 5 yourself (e.g. "a bit lonely" is 2).
+  Don't ask them for a number, and don't record a mood they haven't described.
 - Whenever a medication comes up, record it with log_medication right away,
   using whatever name they give (e.g. "blood pressure tablet"). If a dose was
   missed, don't tell them to take it now, double up or skip it; say their
@@ -95,9 +96,10 @@ def build_model():
     raise ValueError(f"Unknown KIN_MODEL_PROVIDER '{PROVIDER}' (use ollama, openai or bedrock).")
 
 
-def build_agent(person_id: str, tools: MCPClient | None = None, callback_handler=None) -> Agent:
+def build_agent(person_id: str, tools: MCPClient | None = None, quiet: bool = False) -> Agent:
     model = build_model()
-    kwargs = {} if callback_handler is None else {"callback_handler": callback_handler}
+    # quiet: no streamed output (which would include the model's reasoning).
+    kwargs = {"callback_handler": None} if quiet else {}
     return Agent(
         model=model,
         tools=[tools or mcp_client()],
@@ -121,14 +123,14 @@ async def invoke(payload: dict, context) -> dict:
     person_id = payload.get("person_id", "default")
     key = f"{context.session_id or 'local'}:{person_id}"
     if key not in _sessions:
-        _sessions[key] = build_agent(person_id, callback_handler=None)
+        _sessions[key] = build_agent(person_id, quiet=True)
     result = await _sessions[key].invoke_async(prompt)
     return {"reply": str(result).strip()}
 
 
 def chat() -> None:
     person_id = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("KIN_PERSON_ID", "default")
-    agent = build_agent(person_id)
+    agent = build_agent(person_id, quiet=True)
     print(f"Kin ({PROVIDER}:{MODEL_ID}) talking with '{person_id}'. Ctrl-D to quit.")
     while True:
         try:
@@ -137,9 +139,7 @@ def chat() -> None:
             print()
             return
         if line:
-            print("kin> ", end="", flush=True)
-            agent(line)
-            print()
+            print(f"kin> {str(agent(line)).strip()}")
 
 
 if __name__ == "__main__":

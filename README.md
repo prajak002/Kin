@@ -11,6 +11,7 @@ the music and films of the person's youth, and keeps their family informed.
 | Qloo client and reminiscence engine | done, Wikidata fallback without a key |
 | MCP server (Streamable HTTP or stdio) | done, JSON or DynamoDB store, ntfy alerts |
 | Strands agent (open-weight models via Ollama or any OpenAI-compatible host) | done, AgentCore packaging ready |
+| Voice loop (Whisper in, Orpheus or macOS `say` out) | done |
 | WhatsApp / SMS / SES family channel | planned |
 | Family dashboard and simulated Alexa+ (Next.js) | planned |
 | AWS CDK deployment | planned |
@@ -25,6 +26,7 @@ uv run kin-mcp              # http://127.0.0.1:8000/mcp
 uv run scripts/qloo_probe.py
 ollama pull llama3.2
 uv run kin-agent asha        # chat with Kin in the terminal
+uv run kin-voice asha        # talk to Kin out loud (mic + speakers)
 ```
 
 The agent runs an open-weight model: Ollama locally by default
