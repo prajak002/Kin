@@ -6,8 +6,10 @@ import os
 from datetime import date, timedelta
 from typing import Annotated, Literal
 
+import httpx
 from dotenv import load_dotenv
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
 from .notify import notify_family
@@ -35,7 +37,8 @@ server = MCPServer(
 def _require_person(person_id: str) -> dict:
     person = store.get_person(person_id)
     if person is None:
-        raise ValueError(f"Unknown person '{person_id}'. Call register_person first.")
+        # ToolError, unlike other exceptions, passes its message on to the model.
+        raise ToolError(f"Unknown person '{person_id}'. Call register_person first.")
     return person
 
 
@@ -96,7 +99,12 @@ def log_medication(person_id: str, medication: str, taken: bool) -> dict:
 @server.tool()
 async def start_reminiscence(person_id: str, take: int = 6) -> dict:
     """Films and music from the years the person grew up in, for a reminiscence chat."""
-    result = await build_set(Person.from_profile(_require_person(person_id)), take=take)
+    try:
+        result = await build_set(Person.from_profile(_require_person(person_id)), take=take)
+    except ValueError as e:
+        raise ToolError(str(e)) from e
+    except httpx.HTTPError as e:
+        raise ToolError("The film and music source is unreachable right now. Chat about their favourites instead.") from e
     picks = [f.get("film") for f in result["because_you_love"][:2]] + [f["name"] for f in result["films"][:2]]
     picks += [m["name"] for m in result["music"][:2]]
     store.add_moment(person_id, "reminiscence", [p for p in dict.fromkeys(picks) if p])

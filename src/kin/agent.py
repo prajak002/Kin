@@ -1,4 +1,4 @@
-"""Kin conversational agent: Strands on Bedrock, using Kin's MCP tools.
+"""Kin conversational agent: Strands with an open-weight model, using Kin's MCP tools.
 
 Runs locally as a chat REPL (`kin-agent`) or on Bedrock AgentCore Runtime
 (`agentcore launch` with this module as the entrypoint).
@@ -23,7 +23,9 @@ from strands.tools.mcp import MCPClient
 
 load_dotenv()
 
-MODEL_ID = os.environ.get("KIN_MODEL_ID", "global.anthropic.claude-sonnet-5-5")
+PROVIDER = os.environ.get("KIN_MODEL_PROVIDER", "ollama")
+DEFAULT_MODELS = {"ollama": "llama3.2", "openai": "qwen/qwen3-32b", "bedrock": "global.anthropic.claude-sonnet-5-5"}
+MODEL_ID = os.environ.get("KIN_MODEL_ID") or DEFAULT_MODELS.get(PROVIDER, "")
 
 SYSTEM_PROMPT = """\
 You are Kin, a warm companion for an older adult who lives alone. You talk by
@@ -45,7 +47,9 @@ The person you look after has person_id "{person_id}". Today is {today}.
 - Never give medical advice or change medication instructions. Suggest they
   check with their doctor or family instead.
 - If a tool says the person is unknown, ask for their name, birth year and
-  hometown, then call register_person.
+  hometown, then call register_person. Include any films, artists or songs they
+  mention as favourites, and their mother tongue as language if they say it or
+  it is clear from their hometown (for example Bengali for Kolkata).
 """
 
 
@@ -60,8 +64,32 @@ def mcp_client() -> MCPClient:
     return MCPClient(lambda: stdio_client(params))
 
 
+def build_model():
+    """Open-weight models by default: Ollama locally, or any OpenAI-compatible
+    host (Groq, OpenRouter, vLLM) via KIN_MODEL_PROVIDER=openai."""
+    if PROVIDER == "ollama":
+        from strands.models.ollama import OllamaModel
+
+        # Thinking off: replies are spoken, so latency matters more than deliberation.
+        return OllamaModel(
+            os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
+            model_id=MODEL_ID,
+            additional_args={"think": False},
+        )
+    if PROVIDER == "openai":
+        from strands.models.openai import OpenAIModel
+
+        return OpenAIModel(
+            client_args={"base_url": os.environ["KIN_OPENAI_BASE_URL"], "api_key": os.environ["KIN_OPENAI_API_KEY"]},
+            model_id=MODEL_ID,
+        )
+    if PROVIDER == "bedrock":
+        return BedrockModel(model_id=MODEL_ID, region_name=os.environ.get("AWS_REGION"))
+    raise ValueError(f"Unknown KIN_MODEL_PROVIDER '{PROVIDER}' (use ollama, openai or bedrock).")
+
+
 def build_agent(person_id: str, tools: MCPClient | None = None, callback_handler=None) -> Agent:
-    model = BedrockModel(model_id=MODEL_ID, region_name=os.environ.get("AWS_REGION"))
+    model = build_model()
     kwargs = {} if callback_handler is None else {"callback_handler": callback_handler}
     return Agent(
         model=model,
@@ -92,7 +120,7 @@ async def invoke(payload: dict, context) -> dict:
 def chat() -> None:
     person_id = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("KIN_PERSON_ID", "default")
     agent = build_agent(person_id)
-    print(f"Kin ({MODEL_ID}) talking with '{person_id}'. Ctrl-D to quit.")
+    print(f"Kin ({PROVIDER}:{MODEL_ID}) talking with '{person_id}'. Ctrl-D to quit.")
     while True:
         try:
             line = input("\nyou> ").strip()

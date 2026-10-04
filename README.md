@@ -10,7 +10,7 @@ the music and films of the person's youth, and keeps their family informed.
 |---|---|
 | Qloo client and reminiscence engine | done, Wikidata fallback without a key |
 | MCP server (Streamable HTTP or stdio) | done, JSON or DynamoDB store, ntfy alerts |
-| Strands agent on Bedrock AgentCore | agent done, deploy next |
+| Strands agent (open-weight models via Ollama or any OpenAI-compatible host) | done, AgentCore packaging ready |
 | WhatsApp / SMS / SES family channel | planned |
 | Family dashboard and simulated Alexa+ (Next.js) | planned |
 | AWS CDK deployment | planned |
@@ -23,10 +23,13 @@ uv sync
 uv run pytest
 uv run kin-mcp              # http://127.0.0.1:8000/mcp
 uv run scripts/qloo_probe.py
-uv run kin-agent asha        # chat with Kin in the terminal (needs AWS credentials)
+ollama pull llama3.2
+uv run kin-agent asha        # chat with Kin in the terminal
 ```
 
-The agent uses Claude on Bedrock (`KIN_MODEL_ID`) and starts the MCP server
+The agent runs an open-weight model: Ollama locally by default
+(`KIN_MODEL_ID`, default `llama3.2`), or any OpenAI-compatible host serving open
+models with `KIN_MODEL_PROVIDER=openai`. It starts the MCP server
 over stdio unless `KIN_MCP_URL` is set. Deploy it to AgentCore Runtime with
 the starter toolkit:
 

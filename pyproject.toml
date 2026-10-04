@@ -14,7 +14,7 @@ dependencies = [
     "pydantic>=2.9",
     "python-dotenv>=1.0",
     "starlette>=1.7.0",
-    "strands-agents>=1.57.2",
+    "strands-agents[ollama,openai]>=1.57.2",
     "uvicorn>=0.54.0",
 ]
 

@@ -3,6 +3,8 @@ import json
 import httpx
 import pytest
 
+from mcp.server.mcpserver.exceptions import ToolError
+
 from kin.qloo import MOVIE, QlooClient, age_bucket
 from kin.reminiscence import Person, build_with_qloo
 from kin.store import Store
@@ -71,7 +73,7 @@ async def test_mcp_low_mood_raises_alert(tmp_path, monkeypatch):
     assert out["alert"]["level"] == "warning"
     assert mcp_server.wellbeing_summary("asha")["average_mood"] == 2
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ToolError, match="register_person"):
         mcp_server.daily_checkin("nobody", 4)
 
 
