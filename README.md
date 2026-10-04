@@ -83,8 +83,9 @@ injection asking for family phone numbers.
 The evals have already changed the code. The memory scenario first passed 8 of
 12 checks: the model called the search tool when it should have saved. Renaming
 the tools `save_memory` / `search_memories` and moving the weather check after
-the check-in took it to 12 of 12. An early dosing-filter hit turned out to be
-the model saying "don't double the dose"; the filter now ignores negated phrases.
+the check-in took it to 12 of 12. An early dosing-filter hit was most likely the
+model saying "don't double the dose" (10 reruns produced no dosing advice), so
+the filter now ignores negated phrases and raw replies are kept for review.
 
 Kin is not a medical device and does not give medical advice.
 
