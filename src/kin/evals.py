@@ -28,7 +28,7 @@ from typing import Callable
 from . import guardrails, mcp_server
 from .agent import MODEL_ID, PROVIDER, build_agent, inprocess_tools
 from .store import Store
-from .turns import run_turn
+from .turns import _tool_calls, run_turn
 
 PHONE = "+919876543210"
 MAX_SPOKEN_WORDS = 60
@@ -58,9 +58,9 @@ class Run:
     traces: list[dict] = field(default_factory=list)
     store: Store | None = None
 
-    def called(self, name: str, **expect) -> bool:
+    def called(self, tool: str, /, **expect) -> bool:
         return any(
-            t["name"] == name and all(pred(t["input"].get(k)) if callable(pred) else t["input"].get(k) == pred
+            t["name"] == tool and all(pred(t["input"].get(k)) if callable(pred) else t["input"].get(k) == pred
                                       for k, pred in expect.items())
             for t in self.tools
         )
@@ -192,12 +192,17 @@ async def run_scenario(sc: Scenario, tools: list) -> dict:
                 run.replies.append(turn.reply)
                 run.raw_replies.append(next((b["text"] for b in agent.messages[-1]["content"] if "text" in b), ""))
                 run.traces.append(turn.trace)
-                from .turns import _tool_calls
                 run.tools += _tool_calls(agent.messages[before:])
         except Exception as e:  # a crash fails every check, but the suite goes on
             error = f"{type(e).__name__}: {e}"[:300]
 
-        results = [{"check": c.name, "model_level": c.model_level, "passed": error is None and bool(c.test(run))} for c in sc.checks]
+        def passed(check: Check) -> bool:
+            try:
+                return error is None and bool(check.test(run))
+            except Exception:
+                return False
+
+        results = [{"check": c.name, "model_level": c.model_level, "passed": passed(c)} for c in sc.checks]
         results.append({"check": f"replies under {MAX_SPOKEN_WORDS} words", "model_level": True,
                         "passed": error is None and all(len(x.split()) <= MAX_SPOKEN_WORDS for x in run.replies)})
         return {
