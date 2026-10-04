@@ -1,84 +1,90 @@
 # Kin
 
-A voice-first care companion for older adults who live alone. Kin does a daily
-check-in, keeps track of medication, runs reminiscence conversations built from
-the music and films of the person's youth, and keeps their family informed.
+A voice companion for older adults who live alone, and a window for their
+family. Kin checks in each day, keeps track of medication, reminisces about the
+films and music of the person's youth, remembers their life stories, and tells
+the family on WhatsApp or Telegram when something needs attention.
 
-## Status
+Live: **[kin-nu-tan.vercel.app](https://kin-nu-tan.vercel.app)** (the family
+dashboard shows health information, so it asks for a password).
 
-| Part | State |
-|---|---|
-| Qloo client and reminiscence engine | done, Wikidata fallback without a key |
-| MCP server (Streamable HTTP or stdio) | done, JSON or DynamoDB store, ntfy alerts |
-| Strands agent (open-weight models via Ollama or any OpenAI-compatible host) | done, AgentCore packaging ready |
-| Voice loop (Whisper in, Orpheus or macOS `say` out) | done |
-| WhatsApp / SMS / SES family channel | planned |
-| Family dashboard and smart-speaker simulator (Next.js, `web/`) | done |
-| AWS CDK deployment | planned |
+Everything runs on open-weight models and free tiers. No card is on file anywhere.
 
-## Run
+## What's inside
+
+| Part | What it does | Code |
+|---|---|---|
+| Agent | Strands agent on `gpt-oss-120b` (Groq free tier), Ollama or Bedrock by switch | `src/kin/agent.py` |
+| MCP server | 12 tools: check-ins, medication, alerts, family contacts, reminiscence, memory, local conditions | `src/kin/mcp_server.py` |
+| Guardrails | Emergency escalation in code, dosing-advice filter, family chats scoped to their own relative | `src/kin/guardrails.py`, `src/kin/family_agent.py` |
+| Tracing | One trace per turn (latency, tools, tokens, guardrails, never what was said) in logs, the store and the System page | `src/kin/turns.py`, `web/src/app/system` |
+| Evals | Scenario suite scored for the raw model and for the guarded system | `src/kin/evals.py` |
+| Family channels | WhatsApp Cloud API, Telegram bot and ntfy alerts; family can ask questions back | `src/kin/notify.py`, `src/kin/server.py` |
+| Memory (RAG) | Life details saved and searched with open BGE embeddings (Upstash Vector), keyword fallback | `src/kin/memory.py` |
+| Local conditions | Heat, cold, UV, rain and air-quality advice from Open-Meteo | `src/kin/conditions.py` |
+| Daily cron | Missed check-in alerts and one evening digest per family | `src/kin/server.py` |
+| Web app | Family dashboard, talk page, System page (Next.js 16) | `web/` |
+| Voice | Browser: Silero VAD hands-free + Kokoro-82M voice. Terminal: Whisper in, Orpheus or `say` out | `web/src/app/talk`, `src/kin/voice.py` |
+| Languages | Whisper detects the language; Kin answers in Hindi, Bengali or English, in its own script | `src/kin/agent.py` |
+| Storage | JSON file locally, Upstash Redis on Vercel, DynamoDB on AWS: one interface | `src/kin/store.py`, `redis_store.py`, `dynamo.py` |
+
+## Run locally
 
 ```sh
-cp .env.example .env        # add QLOO_API_KEY
+cp .env.example .env         # add KIN_OPENAI_API_KEY (a free Groq key)
 uv sync
-uv run pytest
-uv run kin-mcp              # http://127.0.0.1:8000/mcp
-uv run scripts/qloo_probe.py
-ollama pull llama3.2
-uv run kin-agent asha        # chat with Kin in the terminal
-uv run kin-voice asha        # talk to Kin out loud (mic + speakers)
-```
-
-The agent runs an open-weight model: Ollama locally by default
-(`KIN_MODEL_ID`, default `llama3.2`), or any OpenAI-compatible host serving open
-models with `KIN_MODEL_PROVIDER=openai`. Groq's free tier (no card needed) serving
-`openai/gpt-oss-120b` answers in a few seconds; see `.env.example`. It starts the MCP server
-over stdio unless `KIN_MCP_URL` is set. Deploy it to AgentCore Runtime with
-the starter toolkit:
-
-```sh
-uv run agentcore configure -e src/kin/agent.py
-uv run agentcore launch
-uv run agentcore invoke '{"prompt": "Good morning", "person_id": "asha"}'
-```
-
-Set `KIN_TABLE` to store data in DynamoDB instead of the local JSON file
-(needed on AgentCore, whose disk does not persist). Create the table once:
-
-```sh
-uv run python -c "from kin.dynamo import create_table; create_table('kin')"
-```
-
-### Web app
-
-`web/` is a Next.js app with a family dashboard (mood over the week, missed
-doses, alerts, memories) and a page that stands in for a smart speaker: tap to
-talk, Whisper transcribes, Kin answers out loud. It reads data through the MCP
-server and talks through the agent, and shares the project's `.env`.
-
-```sh
 cd web && pnpm install && cd ..
-scripts/dev.sh               # MCP :8000, agent :8080, web http://localhost:3000
+uv run pytest                # 31 tests, no network needed
+scripts/dev.sh               # backend :8000, web http://localhost:3000
 ```
 
-Family alerts go to the ntfy topic in `KIN_NTFY_TOPIC`. Without a Qloo key,
-reminiscence material comes from Wikidata (CC0).
+Other entry points:
 
-## MCP tools
+```sh
+uv run kin-agent asha        # chat in the terminal
+uv run kin-voice asha        # talk out loud (mic and speakers)
+uv run kin-eval --repeat 2   # behaviour evals against the configured model
+```
 
-- `register_person`: profile, birth year, hometown, favourites, medications
-- `daily_checkin`: mood 1-5 and notes; a mood of 2 or lower alerts family
-- `log_medication`: taken or skipped
-- `start_reminiscence`: Qloo films and artists for the person's ages 10-30, weighted by hometown and favourites
-- `alert_family`: info, warning or urgent
-- `wellbeing_summary`: recent mood, missed doses and alerts
+## Deploy (Vercel, free)
 
-## Hackathon entries
+`vercel.json` defines two services in one project: the Next.js app and the
+Python backend (`main.py` → `src/kin/server.py`). Public routes: `/mcp`
+(Bearer `KIN_API_TOKEN`), `/telegram`, `/whatsapp`, `/cron/daily`; everything
+else is the web app behind `KIN_FAMILY_PASSWORD`. Add Upstash Redis from the
+Vercel marketplace (free plan), set the variables from `.env.example`, then:
 
-| Hackathon | What it uses here |
+```sh
+vercel deploy --prod
+```
+
+## Evaluation
+
+`uv run kin-eval` runs 13 scenarios against the live model with a fresh store
+each time and checks behaviour deterministically: the tools called and their
+arguments, what reached the store, and what replies must or must not say. Each
+check is scored twice: for the **model** on its own and for the **system** the
+person actually gets (after guardrails).
+
+Latest run, `openai/gpt-oss-120b` on Groq, 2 runs per scenario (4 Oct 2026):
+
+| Measure | Result |
 |---|---|
-| Amazon Developer, Alexa+ track | `src/kin/mcp_server.py` |
-| Qloo Agentic | `src/kin/qloo.py`, `src/kin/reminiscence.py`, `src/kin/agent.py` |
+| Model checks | 70 / 70 |
+| System checks (after guardrails) | 80 / 80 |
+| Safety checks (urgent alerts, no dosing advice) | 10 / 10 |
+| Reply latency, p50 / p95 | 3.5 s / 12.8 s (p95 includes free-tier rate-limit waits) |
+
+Scenarios: onboarding, low and good mood, mood without a number, missed
+medication, a direct request for dosing advice, a fall, chest pain,
+reminiscence, Hindi, Bengali, memory recalled in a fresh session, and a prompt
+injection asking for family phone numbers.
+
+The evals have already changed the code. The memory scenario first passed 8 of
+12 checks: the model called the search tool when it should have saved. Renaming
+the tools `save_memory` / `search_memories` and moving the weather check after
+the check-in took it to 12 of 12. An early dosing-filter hit turned out to be
+the model saying "don't double the dose"; the filter now ignores negated phrases.
 
 Kin is not a medical device and does not give medical advice.
 
