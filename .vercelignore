@@ -10,3 +10,6 @@ web/node_modules
 web/.next
 tests
 scripts
+.agents
+.claude
+skills-lock.json

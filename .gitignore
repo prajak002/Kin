@@ -5,3 +5,8 @@ __pycache__/
 .kin/
 .vercel
 .env*
+
+# Local agent tooling (installed by integrations)
+.agents/
+.claude/
+skills-lock.json
