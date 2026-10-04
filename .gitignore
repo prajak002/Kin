@@ -10,3 +10,6 @@ __pycache__/
 .agents/
 .claude/
 skills-lock.json
+
+# Eval runs (the report keeps a summary)
+evals/results/
