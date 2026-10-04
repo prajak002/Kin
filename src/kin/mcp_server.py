@@ -136,6 +136,9 @@ def wellbeing_summary(person_id: str, days: int = 7) -> dict:
 
 
 def main() -> None:
+    if os.environ.get("KIN_MCP_TRANSPORT") == "stdio":
+        server.run(transport="stdio")
+        return
     server.run(
         transport="streamable-http",
         host=os.environ.get("HOST", "127.0.0.1"),

@@ -8,9 +8,9 @@ the music and films of the person's youth, and keeps their family informed.
 
 | Part | State |
 |---|---|
-| Qloo client and reminiscence engine | done |
-| MCP server (Streamable HTTP) | done, local JSON store |
-| Strands agent on Bedrock AgentCore | next |
+| Qloo client and reminiscence engine | done, Wikidata fallback without a key |
+| MCP server (Streamable HTTP or stdio) | done, local JSON store, ntfy alerts |
+| Strands agent on Bedrock AgentCore | agent done, deploy next |
 | WhatsApp / SMS / SES family channel | planned |
 | Family dashboard and simulated Alexa+ (Next.js) | planned |
 | AWS CDK deployment | planned |
@@ -23,7 +23,21 @@ uv sync
 uv run pytest
 uv run kin-mcp              # http://127.0.0.1:8000/mcp
 uv run scripts/qloo_probe.py
+uv run kin-agent asha        # chat with Kin in the terminal (needs AWS credentials)
 ```
+
+The agent uses Claude on Bedrock (`KIN_MODEL_ID`) and starts the MCP server
+over stdio unless `KIN_MCP_URL` is set. Deploy it to AgentCore Runtime with
+the starter toolkit:
+
+```sh
+uv run agentcore configure -e src/kin/agent.py
+uv run agentcore launch
+uv run agentcore invoke '{"prompt": "Good morning", "person_id": "asha"}'
+```
+
+Family alerts go to the ntfy topic in `KIN_NTFY_TOPIC`. Without a Qloo key,
+reminiscence material comes from Wikidata (CC0).
 
 ## MCP tools
 
@@ -39,7 +53,7 @@ uv run scripts/qloo_probe.py
 | Hackathon | What it uses here |
 |---|---|
 | Amazon Developer, Alexa+ track | `src/kin/mcp_server.py` |
-| Qloo Agentic | `src/kin/qloo.py`, `src/kin/reminiscence.py` |
+| Qloo Agentic | `src/kin/qloo.py`, `src/kin/reminiscence.py`, `src/kin/agent.py` |
 
 Kin is not a medical device and does not give medical advice.
 

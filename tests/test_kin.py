@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from kin.qloo import MOVIE, QlooClient, age_bucket
-from kin.reminiscence import Person, build_set
+from kin.reminiscence import Person, build_with_qloo
 from kin.store import Store
 
 
@@ -33,7 +33,7 @@ def test_age_bucket():
 async def test_build_set_uses_formative_years_and_seeds():
     calls: list[httpx.Request] = []
     async with QlooClient("k", "https://qloo.test", transport=fake_qloo(calls)) as qloo:
-        result = await build_set(qloo, Person("Asha", 1948, "Kolkata", ["Satyajit Ray"]))
+        result = await build_with_qloo(qloo, Person("Asha", 1948, "Kolkata", ["Satyajit Ray"]))
 
     movie_call = next(c for c in calls if c.url.params.get("filter.type") == MOVIE)
     assert movie_call.headers["X-Api-Key"] == "k"
@@ -42,7 +42,7 @@ async def test_build_set_uses_formative_years_and_seeds():
     assert movie_call.url.params["signal.interests.entities"] == "id-Satyajit Ray"
     assert movie_call.url.params["signal.location.query"] == "Kolkata"
 
-    data = result.to_dict()
+    data = result
     assert data["formative_years"] == "1958-1978"
     assert data["films"][0] == {"name": f"{MOVIE}-hit", "year": 1965, "affinity": 0.9}
 
@@ -73,3 +73,18 @@ async def test_mcp_low_mood_raises_alert(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError):
         mcp_server.daily_checkin("nobody", 4)
+
+
+def test_agent_reaches_kin_tools_over_stdio(tmp_path, monkeypatch):
+    from kin.agent import mcp_client
+
+    monkeypatch.setenv("KIN_STORE", str(tmp_path / "s.json"))
+    monkeypatch.delenv("KIN_MCP_URL", raising=False)
+    with mcp_client() as client:
+        names = {t.tool_name for t in client.list_tools_sync()}
+        assert {"daily_checkin", "start_reminiscence", "alert_family"} <= names
+        client.call_tool_sync("t1", "register_person", {"person_id": "asha", "name": "Asha",
+                                                        "birth_year": 1948, "hometown": "Kolkata"})
+        out = client.call_tool_sync("t2", "daily_checkin", {"person_id": "asha", "mood": 4})
+    assert out["status"] == "success"
+    assert json.loads((tmp_path / "s.json").read_text())["checkins"][0]["mood"] == 4

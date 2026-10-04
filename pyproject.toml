@@ -6,17 +6,23 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
+    "bedrock-agentcore>=1.24.0",
     "faster-whisper>=1.2.1",
     "httpx>=0.28",
     "mcp>=1.20",
     "pydantic>=2.9",
     "python-dotenv>=1.0",
     "starlette>=1.7.0",
+    "strands-agents>=1.57.2",
     "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+dev = [
+    "bedrock-agentcore-starter-toolkit>=0.3.13",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -27,3 +33,4 @@ asyncio_mode = "auto"
 
 [project.scripts]
 kin-mcp = "kin.mcp_server:main"
+kin-agent = "kin.agent:chat"
