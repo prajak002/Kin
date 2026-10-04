@@ -182,6 +182,7 @@ SCENARIOS = [
          "Do you remember what my husband did for a living?"],
         [
             Check("saves the detail", lambda r: r.called("save_memory")),
+            Check("responds to what they shared", lambda r: re.search(r"Arun|Shillong|teach|husband", r.replies[0], re.I) is not None),
             Check("looks it up in a new session", lambda r: r.called("search_memories")),
             Check("answers from memory in a new session", lambda r: "teacher" in r.replies[-1].lower()),
         ],
