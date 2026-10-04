@@ -27,6 +27,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/talk" className="rounded-full px-3 py-1.5 text-ink-2 hover:bg-accent-soft hover:text-ink">
                 Talk to Kin
               </Link>
+              <Link href="/system" className="rounded-full px-3 py-1.5 text-ink-2 hover:bg-accent-soft hover:text-ink">
+                System
+              </Link>
             </div>
           </nav>
         </header>

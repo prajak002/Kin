@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Run Kin locally: MCP server (:8000), agent (:8080) and the web app (:3000).
-# The agent uses the running MCP server, so everything shares one store.
+# Run Kin locally the way Vercel does: one Python backend (MCP, agent, webhooks)
+# on :8000 and the web app on :3000.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-export KIN_MCP_URL="${KIN_MCP_URL:-http://127.0.0.1:8000/mcp}"
+export KIN_BACKEND_URL="${KIN_BACKEND_URL:-http://127.0.0.1:8000}"
 
 trap 'kill 0' EXIT INT TERM
-uv run kin-mcp &
-uv run python -m kin.agent &
+uv run uvicorn kin.server:app --port 8000 &
 (cd web && pnpm dev) &
 wait

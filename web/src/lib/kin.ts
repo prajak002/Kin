@@ -8,7 +8,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 // On Vercel, KIN_BACKEND_URL is the Python service's private binding.
 const backend = (path: string) => process.env.KIN_BACKEND_URL && new URL(path, process.env.KIN_BACKEND_URL).toString();
 const MCP_URL = backend("/mcp") || process.env.KIN_MCP_URL || "http://127.0.0.1:8000/mcp";
-const AGENT_URL = backend("/invocations") || process.env.KIN_AGENT_URL || "http://127.0.0.1:8080/invocations";
+const AGENT_URL = backend("/invocations") || process.env.KIN_AGENT_URL || "http://127.0.0.1:8000/invocations";
+const TRACES_URL = backend("/traces") || "http://127.0.0.1:8000/traces";
 
 export type Contact = { name: string; relation: string; channel: "whatsapp" | "telegram" | "ntfy"; address: string };
 
@@ -96,4 +97,27 @@ export async function askKin(prompt: string, personId: string, sessionId: string
   const data = (await res.json()) as { reply?: string; error?: string };
   if (!res.ok || data.error) throw new Error(data.error || `agent returned ${res.status}`);
   return data.reply ?? "";
+}
+
+export type Trace = {
+  at: string;
+  channel: string;
+  person: string;
+  model: string;
+  latency_ms: number;
+  tools?: { name: string; ok: boolean }[];
+  tokens?: { input: number; output: number };
+  guardrails: { rule: string; action: string }[];
+  error?: string;
+};
+
+export async function getTraces(limit = 200): Promise<Trace[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${TRACES_URL}?limit=${limit}`, { headers: authHeaders(), cache: "no-store" });
+  } catch (e) {
+    throw new KinOffline(`Kin's backend is not reachable at ${TRACES_URL}`, { cause: e });
+  }
+  if (!res.ok) throw new Error(`traces returned ${res.status}`);
+  return ((await res.json()) as { traces: Trace[] }).traces;
 }
