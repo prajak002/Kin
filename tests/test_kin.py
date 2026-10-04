@@ -446,12 +446,12 @@ def test_memory_store_and_vector(tmp_path, monkeypatch):
     def handler(request):
         body = json.loads(request.content)
         calls.append((request.url.path, body))
-        if request.url.path == "/query-data":
+        if request.url.path == "/query":
             return httpx.Response(200, json={"result": [{"score": 0.91, "metadata": {"person_id": "asha", "fact": "x"}}]})
         return httpx.Response(200, json={"result": "Success"})
 
-    vm = VectorMemory("https://vector.test", "t", transport=httpx.MockTransport(handler))
+    vm = VectorMemory("https://vector.test", "t", transport=httpx.MockTransport(handler), embedder=lambda t: [0.1, 0.2])
     vm.remember("asha", "Lived in Shillong")
     assert vm.recall("asha", "hills")[0]["score"] == 0.91
-    assert calls[0][1][0]["data"] == "Lived in Shillong"
+    assert calls[0][1][0]["vector"] == [0.1, 0.2] and calls[0][1][0]["metadata"]["fact"] == "Lived in Shillong"
     assert calls[1][1]["filter"] == "person_id = 'asha'"
