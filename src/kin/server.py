@@ -5,6 +5,7 @@
   /traces       recent turn traces (latency, tools, guardrails) for the dashboard
   /telegram     Telegram bot webhook: family link up and ask questions
   /whatsapp     WhatsApp Cloud API webhook: family ask questions
+  /cron/daily   evening digest and missed check-in alerts (Vercel Cron)
   /health       liveness
 
 Run locally with `uv run uvicorn kin.server:app --port 8000`.
@@ -25,7 +26,9 @@ from strands import Agent
 
 from . import family_agent, mcp_server
 from .agent import build_agent, inprocess_tools
-from .notify import send_whatsapp_text
+from . import conditions
+from .format import status_text
+from .notify import notify_family, send_whatsapp_text
 from .turns import run_turn
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
@@ -110,6 +113,33 @@ async def telegram(request: Request) -> Response:
 
     await _telegram_reply(chat_id, await family_agent.answer("telegram", str(chat_id), sender, text))
     return JSONResponse({"ok": True})
+
+
+@server.custom_route("/cron/daily", methods=["GET"])
+async def daily(request: Request) -> Response:
+    """Evening run (Vercel Cron): flag anyone who hasn't checked in today and send
+    each family one digest with mood, medication, alerts and weather advice."""
+    secret = os.environ.get("CRON_SECRET")
+    if not secret or request.headers.get("authorization") != f"Bearer {secret}":
+        return Response(status_code=401)
+
+    store, report = mcp_server.store, []
+    for person in store.list_people():
+        summary = mcp_server.wellbeing_summary(person["id"], days=1)
+        lines = [status_text(person, summary)]
+        level = "info"
+        if not store.today("checkins", person["id"]):
+            store.add_alert(person["id"], "warning", f"No check-in from {person['name']} today.")
+            lines.append("No check-in today. Maybe give them a call?")
+            level = "warning"
+        try:
+            today = await conditions.local_conditions(person.get("lives_in") or person["hometown"])
+            lines += [f"Weather tip: {a['say']}" for a in today["advice"][:2]]
+        except Exception:
+            pass  # the digest still goes out without weather
+        sent = await asyncio.to_thread(notify_family, person, level, "\n".join(lines))
+        report.append({"person": person["id"], "level": level, "sent": sum(r["ok"] for r in sent)})
+    return JSONResponse({"ok": True, "people": report})
 
 
 @server.custom_route("/whatsapp", methods=["GET", "POST"])

@@ -290,6 +290,8 @@ def test_emergency_detection(text, hit):
     ("Maybe you could take it now.", True), ("You can double up tonight.", True),
     ("Just skip the dose today.", True), ("Take 500 mg after food.", True), ("Stop taking it for now.", True),
     ("Your pharmacist or doctor can tell you what to do.", False), ("Did you take your tablet this morning?", False),
+    ("Please don't double the dose.", False), ("It's best not to take two tablets tonight.", False),
+    ("You should never double up on blood pressure pills.", False),
 ])
 def test_dosing_advice_detection(reply, hit):
     from kin.guardrails import dosing_advice_in
@@ -396,3 +398,32 @@ def test_family_agent_is_scoped_to_linked_people(tmp_path, monkeypatch):
         wellbeing._tool_func("bina")
     with pytest.raises(ValueError, match="Not allowed"):
         profile._tool_func("bina")
+
+
+def test_daily_cron_digest(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+
+    from kin import mcp_server, server
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    monkeypatch.setenv("CRON_SECRET", "cron")
+    sent = []
+    monkeypatch.setattr(server, "notify_family",
+                        lambda person, level, text: sent.append((person["id"], level, text)) or [{"ok": True}])
+
+    async def fake_conditions(place):
+        return {"advice": [{"risk": "heat", "say": "It will feel like 39°C."}]}
+
+    monkeypatch.setattr(server.conditions, "local_conditions", fake_conditions)
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+    mcp_server.register_person("bina", "Bina", 1950, "Pune")
+    mcp_server.store.add_checkin("bina", 4, "cheerful")
+
+    with TestClient(server.create_app()) as client:
+        assert client.get("/cron/daily").status_code == 401
+        out = client.get("/cron/daily", headers={"authorization": "Bearer cron"}).json()
+
+    assert {p["person"]: p["level"] for p in out["people"]} == {"asha": "warning", "bina": "info"}
+    asha = next(t for pid, _, t in sent if pid == "asha")
+    assert "No check-in today" in asha and "39°C" in asha
+    assert mcp_server.store.recent("alerts", "asha")[-1]["reason"] == "No check-in from Asha today."

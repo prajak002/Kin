@@ -43,10 +43,22 @@
       }
     },
     {
+      "source": "/cron/daily",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
       "source": "/(.*)",
       "destination": {
         "service": "web"
       }
+    }
+  ],
+  "crons": [
+    {
+      "path": "/cron/daily",
+      "schedule": "30 13 * * *"
     }
   ]
 }
