@@ -29,7 +29,8 @@ uv run kin-agent asha        # chat with Kin in the terminal
 
 The agent runs an open-weight model: Ollama locally by default
 (`KIN_MODEL_ID`, default `llama3.2`), or any OpenAI-compatible host serving open
-models with `KIN_MODEL_PROVIDER=openai`. It starts the MCP server
+models with `KIN_MODEL_PROVIDER=openai`. Groq's free tier (no card needed) serving
+`openai/gpt-oss-120b` answers in a few seconds; see `.env.example`. It starts the MCP server
 over stdio unless `KIN_MCP_URL` is set. Deploy it to AgentCore Runtime with
 the starter toolkit:
 

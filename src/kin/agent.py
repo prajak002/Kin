@@ -18,13 +18,14 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from dotenv import load_dotenv
 from mcp import StdioServerParameters, stdio_client
 from strands import Agent
+from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.tools.mcp import MCPClient
 
 load_dotenv()
 
 PROVIDER = os.environ.get("KIN_MODEL_PROVIDER", "ollama")
-DEFAULT_MODELS = {"ollama": "llama3.2", "openai": "llama-3.3-70b-versatile", "bedrock": "global.anthropic.claude-sonnet-5-5"}
+DEFAULT_MODELS = {"ollama": "llama3.2", "openai": "openai/gpt-oss-120b", "bedrock": "global.anthropic.claude-sonnet-5-5"}
 MODEL_ID = os.environ.get("KIN_MODEL_ID") or DEFAULT_MODELS.get(PROVIDER, "")
 
 SYSTEM_PROMPT = """\
@@ -34,21 +35,25 @@ no markdown, no emoji. Ask one question at a time and leave room to answer.
 
 The person you look after has person_id "{person_id}". Today is {today}.
 
-- Early in the first conversation of the day, ask how they are feeling and record
-  it with daily_checkin, mapping their answer to a mood from 1 to 5.
-- Whenever a medication comes up, record it with log_medication.
+- Early in the first conversation of the day, ask how they are feeling. Only after
+  they tell you, record it with daily_checkin, mapping their answer to a mood
+  from 1 to 5. Never guess a mood they haven't given.
+- Whenever a medication comes up, record it with log_medication right away,
+  using whatever name they give (e.g. "blood pressure tablet"). If a dose was
+  missed, don't tell them to take it now, double up or skip it; say their
+  pharmacist or doctor can tell them what to do, and offer to let family know.
 - When they want to chat about the past, or seem low or lonely, call
   start_reminiscence and bring up one film or song at a time from the result.
   Ask what it reminds them of; don't recite the list.
 - If they mention a fall, chest pain, breathing trouble, confusion, or ask for
   help, call alert_family with level "urgent" straight away and tell them their
-  family is being contacted. For emergencies, tell them to call local emergency
-  services.
+  family is being contacted. For a fall with pain, chest pain or trouble
+  breathing, also ask them to call local emergency services now.
 - Never give medical advice or change medication instructions. Suggest they
   check with their doctor or family instead.
 - If a tool says the person is unknown, ask for their name, birth year and
   hometown, then call register_person. Include any films, artists or songs they
-  mention as favourites, and their mother tongue as language if they say it or
+  mention as favourites (just the names, e.g. "Satyajit Ray"), and their mother tongue as language if they say it or
   it is clear from their hometown (for example Bengali for Kolkata).
 """
 
@@ -82,6 +87,8 @@ def build_model():
         return OpenAIModel(
             client_args={"base_url": os.environ["KIN_OPENAI_BASE_URL"], "api_key": os.environ["KIN_OPENAI_API_KEY"]},
             model_id=MODEL_ID,
+            # gpt-oss and other reasoning models: keep deliberation short for voice.
+            params={"reasoning_effort": os.environ.get("KIN_REASONING_EFFORT", "low")},
         )
     if PROVIDER == "bedrock":
         return BedrockModel(model_id=MODEL_ID, region_name=os.environ.get("AWS_REGION"))
@@ -95,6 +102,8 @@ def build_agent(person_id: str, tools: MCPClient | None = None, callback_handler
         model=model,
         tools=[tools or mcp_client()],
         system_prompt=SYSTEM_PROMPT.format(person_id=person_id, today=date.today().isoformat()),
+        # Free-tier hosts cap tokens per minute; the last ~10 exchanges are enough for a chat.
+        conversation_manager=SlidingWindowConversationManager(window_size=int(os.environ.get("KIN_HISTORY", "20"))),
         **kwargs,
     )
 
