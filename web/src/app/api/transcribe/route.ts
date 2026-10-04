@@ -14,8 +14,9 @@ export async function POST(request: Request) {
   const form = new FormData();
   form.append("file", audio, `speech.${ext}`);
   form.append("model", process.env.KIN_STT_MODEL || "whisper-large-v3-turbo");
-  form.append("response_format", "text");
-  form.append("language", process.env.KIN_STT_LANGUAGE || "en");
+  // verbose_json includes the detected language; Hindi and Bengali work out of the box.
+  form.append("response_format", "verbose_json");
+  if (process.env.KIN_STT_LANGUAGE) form.append("language", process.env.KIN_STT_LANGUAGE);
 
   const res = await fetch(`${base}/audio/transcriptions`, {
     method: "POST",
@@ -25,5 +26,6 @@ export async function POST(request: Request) {
   if (!res.ok) {
     return Response.json({ error: `transcription failed (${res.status}): ${await res.text()}` }, { status: 502 });
   }
-  return Response.json({ text: (await res.text()).trim() });
+  const data = (await res.json()) as { text: string; language?: string };
+  return Response.json({ text: data.text.trim(), language: data.language ?? null });
 }

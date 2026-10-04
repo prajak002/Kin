@@ -84,7 +84,8 @@ def transcribe(wav: bytes) -> str:
         f"{base}/audio/transcriptions",
         headers=headers,
         files={"file": ("speech.wav", wav, "audio/wav")},
-        data={"model": STT_MODEL, "response_format": "text", "language": os.environ.get("KIN_STT_LANGUAGE", "en")},
+        data={"model": STT_MODEL, "response_format": "text",
+              **({"language": lang} if (lang := os.environ.get("KIN_STT_LANGUAGE")) else {})},
         timeout=60,
     )
     r.raise_for_status()
