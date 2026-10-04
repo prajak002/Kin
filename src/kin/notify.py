@@ -76,6 +76,17 @@ def send_whatsapp(phone: str, person_name: str, level: str, reason: str) -> None
     ).raise_for_status()
 
 
+def send_whatsapp_text(phone: str, text: str) -> None:
+    """Free-form reply, allowed within 24 hours of the contact's last message."""
+    version = os.environ.get("KIN_WHATSAPP_API_VERSION", "v23.0")
+    httpx.post(
+        f"https://graph.facebook.com/{version}/{os.environ['KIN_WHATSAPP_PHONE_ID']}/messages",
+        headers={"Authorization": f"Bearer {os.environ['KIN_WHATSAPP_TOKEN']}"},
+        json={"messaging_product": "whatsapp", "to": phone.lstrip("+"), "type": "text", "text": {"body": text[:4000]}},
+        timeout=TIMEOUT,
+    ).raise_for_status()
+
+
 SENDERS = {"whatsapp": send_whatsapp, "telegram": send_telegram, "ntfy": send_ntfy}
 
 

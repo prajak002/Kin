@@ -3,7 +3,8 @@
   /mcp          MCP server (Streamable HTTP, stateless): Alexa+ and the dashboard
   /invocations  the agent, AgentCore-compatible: {"prompt", "person_id"}
   /traces       recent turn traces (latency, tools, guardrails) for the dashboard
-  /telegram     Telegram bot webhook: family link up and ask for updates
+  /telegram     Telegram bot webhook: family link up and ask questions
+  /whatsapp     WhatsApp Cloud API webhook: family ask questions
   /health       liveness
 
 Run locally with `uv run uvicorn kin.server:app --port 8000`.
@@ -11,7 +12,10 @@ Run locally with `uv run uvicorn kin.server:app --port 8000`.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import hmac
+import json
 import os
 
 import httpx
@@ -19,9 +23,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from strands import Agent
 
-from . import mcp_server
+from . import family_agent, mcp_server
 from .agent import build_agent, inprocess_tools
-from .format import status_text
+from .notify import send_whatsapp_text
 from .turns import run_turn
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
@@ -104,13 +108,36 @@ async def telegram(request: Request) -> Response:
             )
         return JSONResponse({"ok": True})
 
-    people = [p for p in store.list_people()
-              if any(c["channel"] == "telegram" and c["address"] == str(chat_id) for c in p.get("family", []))]
-    if not people:
-        await _telegram_reply(chat_id, "This chat isn't connected to anyone yet. Use the link on Kin's family page.")
-    else:
-        updates = [status_text(p, mcp_server.wellbeing_summary(p["id"], days=2)) for p in people]
-        await _telegram_reply(chat_id, "\n\n".join(updates))
+    await _telegram_reply(chat_id, await family_agent.answer("telegram", str(chat_id), sender, text))
+    return JSONResponse({"ok": True})
+
+
+@server.custom_route("/whatsapp", methods=["GET", "POST"])
+async def whatsapp(request: Request) -> Response:
+    """Meta WhatsApp Cloud API webhook: family members message Kin's number."""
+    if request.method == "GET":  # Meta's one-time verification handshake
+        q = request.query_params
+        verify = os.environ.get("KIN_WHATSAPP_VERIFY_TOKEN")
+        if verify and q.get("hub.mode") == "subscribe" and q.get("hub.verify_token") == verify:
+            return Response(q.get("hub.challenge", ""), media_type="text/plain")
+        return Response(status_code=403)
+
+    body = await request.body()
+    if secret := os.environ.get("KIN_WHATSAPP_APP_SECRET"):
+        expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(request.headers.get("X-Hub-Signature-256", ""), expected):
+            return Response(status_code=401)
+
+    for entry in json.loads(body or b"{}").get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            names = {c["wa_id"]: c.get("profile", {}).get("name", "") for c in value.get("contacts", [])}
+            for msg in value.get("messages", []):
+                if msg.get("type") != "text":
+                    continue
+                sender = msg["from"]
+                reply = await family_agent.answer("whatsapp", sender, names.get(sender, ""), msg["text"]["body"])
+                await asyncio.to_thread(send_whatsapp_text, sender, reply)
     return JSONResponse({"ok": True})
 
 
@@ -136,5 +163,10 @@ class RequireToken:
 
 # Stateless + JSON responses suit serverless; host 0.0.0.0 turns off the
 # localhost-only DNS rebinding check, which would reject the public hostname.
-app = server.streamable_http_app(stateless_http=True, json_response=True, host="0.0.0.0")
-app.add_middleware(RequireToken)
+def create_app():
+    app = server.streamable_http_app(stateless_http=True, json_response=True, host="0.0.0.0")
+    app.add_middleware(RequireToken)
+    return app
+
+
+app = create_app()

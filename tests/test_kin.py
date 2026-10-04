@@ -233,7 +233,7 @@ def test_server_mcp_and_telegram(tmp_path, monkeypatch):
     mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
     mcp_server.daily_checkin("asha", 2, "a bit lonely")
 
-    with TestClient(server.app) as client:
+    with TestClient(server.create_app()) as client:
         assert client.get("/health").json() == {"ok": True}
         assert client.post("/invocations", json={"prompt": " "}).status_code == 400
 
@@ -264,8 +264,16 @@ def test_server_mcp_and_telegram(tmp_path, monkeypatch):
         assert "connected to Asha" in replies[-1][1]
         assert mcp_server.list_people()[0]["family"][0] == {
             "name": "Ravi", "relation": "", "channel": "telegram", "address": "42"}
+        asked = []
+
+        async def fake_answer(channel, address, sender, text):
+            asked.append((channel, address, sender, text))
+            return "She's had a quiet day."
+
+        monkeypatch.setattr(server.family_agent, "answer", fake_answer)
         client.post("/telegram", headers=hdr, json=update("how is mum?"))
-        assert "Mood: low (a bit lonely)" in replies[-1][1]
+        assert asked == [("telegram", "42", "Ravi", "how is mum?")]
+        assert replies[-1] == (42, "She's had a quiet day.")
 
 
 @pytest.mark.parametrize("text, hit", [
@@ -331,3 +339,60 @@ async def test_run_turn_traces_and_guardrails(tmp_path, monkeypatch):
                    person_id="asha", raise_alert=lambda *a: alerts.append(a))
     assert len(alerts) == 1
     assert len(mcp_server.store.recent_traces()) == 3
+
+
+def test_whatsapp_webhook(tmp_path, monkeypatch):
+    import hashlib
+    import hmac as hmac_
+
+    from starlette.testclient import TestClient
+
+    from kin import mcp_server, server
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    monkeypatch.setenv("KIN_WHATSAPP_VERIFY_TOKEN", "verify-me")
+    monkeypatch.setenv("KIN_WHATSAPP_APP_SECRET", "app-secret")
+    sent, asked = [], []
+
+    async def fake_answer(channel, address, sender, text):
+        asked.append((channel, address, sender, text))
+        return "Mum checked in happy this morning."
+
+    monkeypatch.setattr(server.family_agent, "answer", fake_answer)
+    monkeypatch.setattr(server, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+
+    payload = json.dumps({"entry": [{"changes": [{"value": {
+        "contacts": [{"wa_id": "919876543210", "profile": {"name": "Ravi"}}],
+        "messages": [{"from": "919876543210", "type": "text", "text": {"body": "How is mum?"}}],
+    }}]}]}).encode()
+    sig = "sha256=" + hmac_.new(b"app-secret", payload, hashlib.sha256).hexdigest()
+
+    with TestClient(server.create_app()) as client:
+        ok = client.get("/whatsapp", params={"hub.mode": "subscribe", "hub.verify_token": "verify-me", "hub.challenge": "123"})
+        assert ok.text == "123"
+        assert client.get("/whatsapp", params={"hub.mode": "subscribe", "hub.verify_token": "nope"}).status_code == 403
+        assert client.post("/whatsapp", content=payload, headers={"X-Hub-Signature-256": "sha256=bad"}).status_code == 401
+        assert client.post("/whatsapp", content=payload, headers={"X-Hub-Signature-256": sig}).status_code == 200
+
+    assert asked == [("whatsapp", "919876543210", "Ravi", "How is mum?")]
+    assert sent == [("919876543210", "Mum checked in happy this morning.")]
+
+
+def test_family_agent_is_scoped_to_linked_people(tmp_path, monkeypatch):
+    from kin import family_agent, mcp_server
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+    mcp_server.register_person("bina", "Bina", 1950, "Pune")
+    mcp_server.add_family_contact("asha", "Ravi", "whatsapp", "+91 98765 43210")
+
+    people = family_agent.contacts_for(mcp_server.store, "whatsapp", "919876543210")
+    assert [p["id"] for p in people] == ["asha"]
+    assert family_agent.contacts_for(mcp_server.store, "whatsapp", "910000000000") == []
+
+    wellbeing, profile = family_agent._scoped_tools(people)
+    assert wellbeing._tool_func("asha")["name"] == "Asha"
+    with pytest.raises(ValueError, match="Not allowed"):
+        wellbeing._tool_func("bina")
+    with pytest.raises(ValueError, match="Not allowed"):
+        profile._tool_func("bina")
