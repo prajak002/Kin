@@ -17,7 +17,7 @@ from datetime import date
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from dotenv import load_dotenv
 from mcp import StdioServerParameters, stdio_client
-from strands import Agent
+from strands import Agent, ModelRetryStrategy
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.tools.mcp import MCPClient
@@ -95,13 +95,22 @@ def build_model():
         )
     if PROVIDER == "openai":
         from strands.models.openai import OpenAIModel
+        from strands.models.routing import ModelRouter
 
-        return OpenAIModel(
-            client_args={"base_url": os.environ["KIN_OPENAI_BASE_URL"], "api_key": os.environ["KIN_OPENAI_API_KEY"]},
-            model_id=MODEL_ID,
-            # gpt-oss and other reasoning models: keep deliberation short for voice.
-            params={"reasoning_effort": os.environ.get("KIN_REASONING_EFFORT", "low")},
-        )
+        def openai_model(model_id: str) -> OpenAIModel:
+            return OpenAIModel(
+                client_args={"base_url": os.environ["KIN_OPENAI_BASE_URL"], "api_key": os.environ["KIN_OPENAI_API_KEY"]},
+                model_id=model_id,
+                # gpt-oss and other reasoning models: keep deliberation short for voice.
+                params={"reasoning_effort": os.environ.get("KIN_REASONING_EFFORT", "low")},
+            )
+
+        # Free tiers cap tokens per model per day; a second open model with its own
+        # quota keeps Kin answering when the first is throttled.
+        fallback = os.environ.get("KIN_FALLBACK_MODEL_ID", "openai/gpt-oss-20b")
+        if not fallback or fallback == MODEL_ID:
+            return openai_model(MODEL_ID)
+        return ModelRouter([openai_model(MODEL_ID), openai_model(fallback)])
     if PROVIDER == "bedrock":
         return BedrockModel(model_id=MODEL_ID, region_name=os.environ.get("AWS_REGION"))
     raise ValueError(f"Unknown KIN_MODEL_PROVIDER '{PROVIDER}' (use ollama, openai or bedrock).")
@@ -142,6 +151,8 @@ def build_agent(
     kwargs = {"callback_handler": None} if quiet else {}
     return Agent(
         model=model,
+        # Fail over within seconds instead of backing off for minutes on a throttled model.
+        retry_strategy=ModelRetryStrategy(max_attempts=2, initial_delay=1, max_delay=2),
         tools=tools if isinstance(tools, list) else [tools or mcp_client()],
         messages=messages,
         system_prompt=SYSTEM_PROMPT.format(person_id=person_id, today=date.today().isoformat()),

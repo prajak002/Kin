@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from strands import Agent, tool
+from strands import Agent, ModelRetryStrategy, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 
 from . import mcp_server
@@ -99,6 +99,7 @@ async def answer(channel: str, address: str, sender: str, text: str) -> str:
         ),
         messages=store.load_chat(session) if hasattr(store, "load_chat") else None,
         conversation_manager=SlidingWindowConversationManager(window_size=12),
+        retry_strategy=ModelRetryStrategy(max_attempts=2, initial_delay=1, max_delay=2),
         callback_handler=None,
     )
     try:
