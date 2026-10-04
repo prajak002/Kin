@@ -222,6 +222,7 @@ def test_server_mcp_and_telegram(tmp_path, monkeypatch):
     from kin import mcp_server, server
 
     monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    monkeypatch.delenv("KIN_API_TOKEN", raising=False)
     monkeypatch.setenv("KIN_TELEGRAM_WEBHOOK_SECRET", "sekret")
     replies = []
 
@@ -265,3 +266,68 @@ def test_server_mcp_and_telegram(tmp_path, monkeypatch):
             "name": "Ravi", "relation": "", "channel": "telegram", "address": "42"}
         client.post("/telegram", headers=hdr, json=update("how is mum?"))
         assert "Mood: low (a bit lonely)" in replies[-1][1]
+
+
+@pytest.mark.parametrize("text, hit", [
+    ("I fell in the bathroom", True), ("I have chest pain", True), ("I can't breathe properly", True),
+    ("Help me please", True), ("I watched a film about a fall of an empire", False), ("I feel fine", False),
+])
+def test_emergency_detection(text, hit):
+    from kin.guardrails import emergency_in
+
+    assert (emergency_in(text) is not None) == hit
+
+
+@pytest.mark.parametrize("reply, hit", [
+    ("Maybe you could take it now.", True), ("You can double up tonight.", True),
+    ("Just skip the dose today.", True), ("Take 500 mg after food.", True), ("Stop taking it for now.", True),
+    ("Your pharmacist or doctor can tell you what to do.", False), ("Did you take your tablet this morning?", False),
+])
+def test_dosing_advice_detection(reply, hit):
+    from kin.guardrails import dosing_advice_in
+
+    assert (dosing_advice_in(reply) is not None) == hit
+
+
+class StubAgent:
+    """Just what run_turn needs: invoke_async, messages and usage metrics."""
+
+    def __init__(self, reply, tool_calls=()):
+        from types import SimpleNamespace
+
+        self.reply, self.tool_calls, self.messages = reply, tool_calls, []
+        self.event_loop_metrics = SimpleNamespace(agent_invocations=[SimpleNamespace(usage={"inputTokens": 10, "outputTokens": 5})])
+
+    async def invoke_async(self, text):
+        for i, (name, args) in enumerate(self.tool_calls):
+            self.messages.append({"role": "assistant", "content": [{"toolUse": {"toolUseId": f"t{i}", "name": name, "input": args}}]})
+            self.messages.append({"role": "user", "content": [{"toolResult": {"toolUseId": f"t{i}", "status": "success", "content": []}}]})
+        return self.reply
+
+
+async def test_run_turn_traces_and_guardrails(tmp_path, monkeypatch):
+    from kin import mcp_server
+    from kin.turns import run_turn
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    alerts = []
+
+    # Dosing advice is replaced; the trace records tools and tokens but no text.
+    turn = await run_turn(StubAgent("Maybe take it now.", [("log_medication", {"taken": False})]),
+                          "I forgot my tablet", person_id="asha", raise_alert=lambda *a: alerts.append(a))
+    assert "pharmacist or doctor" in turn.reply
+    assert turn.trace["tools"] == [{"name": "log_medication", "ok": True}]
+    assert turn.trace["tokens"] == {"input": 10, "output": 5}
+    assert turn.trace["guardrails"][0]["rule"] == "dosing_advice"
+    assert "forgot" not in json.dumps(turn.trace)
+
+    # Emergency the model ignored: the guardrail raises the alert.
+    turn = await run_turn(StubAgent("Oh dear."), "I fell and can't get up", person_id="asha",
+                          raise_alert=lambda *a: alerts.append(a))
+    assert alerts and alerts[0][0] == "asha" and "family know" in turn.reply
+
+    # Emergency the model handled: no second alert.
+    await run_turn(StubAgent("Calling them.", [("alert_family", {"level": "urgent"})]), "I fell",
+                   person_id="asha", raise_alert=lambda *a: alerts.append(a))
+    assert len(alerts) == 1
+    assert len(mcp_server.store.recent_traces()) == 3

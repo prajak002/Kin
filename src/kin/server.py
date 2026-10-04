@@ -2,6 +2,7 @@
 
   /mcp          MCP server (Streamable HTTP, stateless): Alexa+ and the dashboard
   /invocations  the agent, AgentCore-compatible: {"prompt", "person_id"}
+  /traces       recent turn traces (latency, tools, guardrails) for the dashboard
   /telegram     Telegram bot webhook: family link up and ask for updates
   /health       liveness
 
@@ -21,6 +22,7 @@ from strands import Agent
 from . import mcp_server
 from .agent import build_agent, inprocess_tools
 from .format import status_text
+from .turns import run_turn
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
 
@@ -49,12 +51,24 @@ async def invocations(request: Request) -> Response:
     if hasattr(store, "load_chat"):
         # Serverless: any instance may get the next turn, so history lives in the store.
         agent = build_agent(person_id, tools=_tools, quiet=True, messages=store.load_chat(key))
-        result = await agent.invoke_async(prompt)
-        store.save_chat(key, agent.messages)
     else:
         agent = _agents.get(key) or _agents.setdefault(key, build_agent(person_id, tools=_tools, quiet=True))
-        result = await agent.invoke_async(prompt)
-    return JSONResponse({"reply": str(result).strip()})
+    turn = await run_turn(agent, prompt, person_id=person_id, channel=payload.get("channel", "voice"), raise_alert=_urgent)
+    if hasattr(store, "save_chat"):
+        store.save_chat(key, agent.messages)
+    return JSONResponse({"reply": turn.reply, "trace": turn.trace})
+
+
+def _urgent(person_id: str, reason: str) -> None:
+    """Emergency fallback used by the guardrail when the model didn't alert."""
+    if person := mcp_server.store.get_person(person_id):
+        mcp_server.raise_alert(person, "urgent", reason)
+
+
+@server.custom_route("/traces", methods=["GET"])
+async def traces(request: Request) -> Response:
+    limit = min(int(request.query_params.get("limit", 200)), 500)
+    return JSONResponse({"traces": mcp_server.store.recent_traces(limit)})
 
 
 async def _telegram_reply(chat_id: int, text: str) -> None:
@@ -104,7 +118,7 @@ class RequireToken:
     """When KIN_API_TOKEN is set, /mcp and /invocations need `Authorization: Bearer <token>`
     (or `?key=<token>` for MCP clients that can't set headers)."""
 
-    PROTECTED = ("/mcp", "/invocations")
+    PROTECTED = ("/mcp", "/invocations", "/traces")
 
     def __init__(self, app):
         self.app = app

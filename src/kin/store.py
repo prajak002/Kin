@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 
-TABLES = ("checkins", "doses", "alerts", "moments")
+TABLES = ("checkins", "doses", "alerts", "moments", "traces")
+MAX_TRACES = 500
 
 
 def _now() -> str:
@@ -85,6 +86,15 @@ class Store:
     def recent(self, table: str, person_id: str, limit: int = 20) -> list[dict[str, Any]]:
         rows = [r for r in self._read()[table] if r["person_id"] == person_id]
         return rows[-limit:]
+
+    def log_trace(self, trace: dict[str, Any]) -> None:
+        with self._lock:
+            data = self._read()
+            data["traces"] = (data["traces"] + [{"person_id": "system", **trace}])[-MAX_TRACES:]
+            self._write(data)
+
+    def recent_traces(self, limit: int = 200) -> list[dict[str, Any]]:
+        return self.recent("traces", "system", limit)
 
 
 def open_store():

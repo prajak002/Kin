@@ -99,3 +99,9 @@ class DynamoStore:
         cond = Key("pk").eq(_pk(person_id)) & Key("sk").begins_with(f"{table}#")
         page = self.table.query(KeyConditionExpression=cond, ScanIndexForward=False, Limit=limit)
         return [_plain(i) for i in reversed(page["Items"])]
+
+    def log_trace(self, trace: dict[str, Any]) -> None:
+        self._append("traces", {"person_id": "system", **trace})
+
+    def recent_traces(self, limit: int = 200) -> list[dict[str, Any]]:
+        return self.recent("traces", "system", limit)

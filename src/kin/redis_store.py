@@ -84,6 +84,13 @@ class RedisStore:
     def today(self, table: str, person_id: str) -> list[dict[str, Any]]:
         return [r for r in self.recent(table, person_id, 200) if local_date(r["at"]) == date.today()]
 
+    def log_trace(self, trace: dict[str, Any]) -> None:
+        key = "kin:traces:system"
+        self._pipeline(["RPUSH", key, json.dumps({"person_id": "system", **trace})], ["LTRIM", key, -500, -1])
+
+    def recent_traces(self, limit: int = 200) -> list[dict[str, Any]]:
+        return self.recent("traces", "system", limit)
+
     # Agent conversation history, so serverless instances can pick up a chat.
     def load_chat(self, session: str) -> list[dict[str, Any]]:
         raw = self._cmd("GET", f"kin:chat:{session}")
