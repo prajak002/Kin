@@ -9,7 +9,7 @@ the music and films of the person's youth, and keeps their family informed.
 | Part | State |
 |---|---|
 | Qloo client and reminiscence engine | done, Wikidata fallback without a key |
-| MCP server (Streamable HTTP or stdio) | done, local JSON store, ntfy alerts |
+| MCP server (Streamable HTTP or stdio) | done, JSON or DynamoDB store, ntfy alerts |
 | Strands agent on Bedrock AgentCore | agent done, deploy next |
 | WhatsApp / SMS / SES family channel | planned |
 | Family dashboard and simulated Alexa+ (Next.js) | planned |
@@ -34,6 +34,13 @@ the starter toolkit:
 uv run agentcore configure -e src/kin/agent.py
 uv run agentcore launch
 uv run agentcore invoke '{"prompt": "Good morning", "person_id": "asha"}'
+```
+
+Set `KIN_TABLE` to store data in DynamoDB instead of the local JSON file
+(needed on AgentCore, whose disk does not persist). Create the table once:
+
+```sh
+uv run python -c "from kin.dynamo import create_table; create_table('kin')"
 ```
 
 Family alerts go to the ntfy topic in `KIN_NTFY_TOPIC`. Without a Qloo key,

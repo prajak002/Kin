@@ -12,13 +12,13 @@ from pydantic import Field
 
 from .notify import notify_family
 from .reminiscence import Person, build_set
-from .store import Store, local_date
+from .store import local_date, open_store
 
 load_dotenv()
 
 LOW_MOOD = 2
 
-store = Store()
+store = open_store()
 server = MCPServer(
     name="kin",
     title="Kin care companion",

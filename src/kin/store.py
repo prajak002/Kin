@@ -1,7 +1,6 @@
 """Local JSON store for people, medications and check-ins.
 
-Stands in for DynamoDB during development; the interface is what the agent
-and MCP server depend on.
+Used in development; dynamo.DynamoStore has the same interface for deployment.
 """
 
 from __future__ import annotations
@@ -86,3 +85,12 @@ class Store:
     def recent(self, table: str, person_id: str, limit: int = 20) -> list[dict[str, Any]]:
         rows = [r for r in self._read()[table] if r["person_id"] == person_id]
         return rows[-limit:]
+
+
+def open_store():
+    """DynamoDB when KIN_TABLE is set (deployed), the local JSON file otherwise."""
+    if os.environ.get("KIN_TABLE"):
+        from .dynamo import DynamoStore
+
+        return DynamoStore()
+    return Store()

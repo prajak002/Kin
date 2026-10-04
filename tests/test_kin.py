@@ -88,3 +88,33 @@ def test_agent_reaches_kin_tools_over_stdio(tmp_path, monkeypatch):
         out = client.call_tool_sync("t2", "daily_checkin", {"person_id": "asha", "mood": 4})
     assert out["status"] == "success"
     assert json.loads((tmp_path / "s.json").read_text())["checkins"][0]["mood"] == 4
+
+
+def test_dynamo_store_matches_json_store(monkeypatch):
+    from moto import mock_aws
+
+    from kin.dynamo import DynamoStore, create_table
+
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    with mock_aws():
+        create_table("kin-test")
+        store = DynamoStore("kin-test")
+        store.upsert_person("asha", name="Asha", birth_year=1948)
+        store.upsert_person("asha", hometown="Kolkata")
+        assert store.get_person("asha") == {"id": "asha", "medications": [], "family": [],
+                                            "name": "Asha", "birth_year": 1948, "hometown": "Kolkata"}
+        assert store.get_person("nobody") is None
+
+        store.add_checkin("asha", 3, at="2020-01-01T08:00:00+00:00")
+        store.add_checkin("asha", 2, "tired")
+        store.add_dose("asha", "metformin", False)
+        store.add_moment("asha", "reminiscence", ["Pather Panchali"])
+        assert [c["mood"] for c in store.recent("checkins", "asha")] == [3, 2]
+        assert [c["mood"] for c in store.recent("checkins", "asha", limit=1)] == [2]
+        assert [c["mood"] for c in store.today("checkins", "asha")] == [2]
+        assert store.recent("doses", "asha")[0]["taken"] is False
+        assert store.recent("moments", "asha")[0]["items"] == ["Pather Panchali"]
+        assert [p["id"] for p in store.list_people()] == ["asha"]
