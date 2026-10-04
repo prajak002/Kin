@@ -32,6 +32,8 @@ def embed(text: str) -> list[float]:
     life of the process (about 64 MB, cached under /tmp on serverless)."""
     global _embedder
     if _embedder is None:
+        if os.environ.get("VERCEL"):  # only /tmp is writable; the Hub client writes under HF_HOME
+            os.environ.setdefault("HF_HOME", "/tmp/hf-home")
         from fastembed import TextEmbedding
 
         cache = "/tmp/kin-fastembed" if os.environ.get("VERCEL") else ".kin/models"
