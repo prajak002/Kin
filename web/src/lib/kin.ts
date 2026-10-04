@@ -78,7 +78,7 @@ export const addContact = (personId: string, c: Contact) =>
 export const removeContact = (personId: string, channel: string, address: string) =>
   callTool<Person>("remove_family_contact", { person_id: personId, channel, address });
 
-export async function askKin(prompt: string, personId: string, sessionId: string): Promise<string> {
+export async function askKin(prompt: string, personId: string, sessionId: string): Promise<{ reply: string; trace?: Trace }> {
   let res: Response;
   try {
     res = await fetch(AGENT_URL, {
@@ -94,9 +94,9 @@ export async function askKin(prompt: string, personId: string, sessionId: string
   } catch (e) {
     throw new KinOffline(`Kin's agent is not reachable at ${AGENT_URL}`, { cause: e });
   }
-  const data = (await res.json()) as { reply?: string; error?: string };
+  const data = (await res.json()) as { reply?: string; trace?: Trace; error?: string };
   if (!res.ok || data.error) throw new Error(data.error || `agent returned ${res.status}`);
-  return data.reply ?? "";
+  return { reply: data.reply ?? "", trace: data.trace };
 }
 
 export type Trace = {

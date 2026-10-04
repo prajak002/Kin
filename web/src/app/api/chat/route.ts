@@ -10,8 +10,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "text and sessionId are required" }, { status: 400 });
   }
   try {
-    const reply = await askKin(text.trim(), personId || "default", sessionId);
-    return Response.json({ reply });
+    const { reply, trace } = await askKin(text.trim(), personId || "default", sessionId);
+    return Response.json({ reply, trace });
   } catch (e) {
     const status = e instanceof KinOffline ? 503 : 502;
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status });
