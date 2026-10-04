@@ -24,7 +24,7 @@ from strands.tools.mcp import MCPClient
 load_dotenv()
 
 PROVIDER = os.environ.get("KIN_MODEL_PROVIDER", "ollama")
-DEFAULT_MODELS = {"ollama": "llama3.2", "openai": "qwen/qwen3-32b", "bedrock": "global.anthropic.claude-sonnet-5-5"}
+DEFAULT_MODELS = {"ollama": "llama3.2", "openai": "llama-3.3-70b-versatile", "bedrock": "global.anthropic.claude-sonnet-5-5"}
 MODEL_ID = os.environ.get("KIN_MODEL_ID") or DEFAULT_MODELS.get(PROVIDER, "")
 
 SYSTEM_PROMPT = """\
