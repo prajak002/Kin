@@ -214,6 +214,7 @@ async def run_scenario(sc: Scenario, tools: list) -> dict:
             "tools": [t["name"] for t in run.tools],
             "guardrails": [g for t in run.traces for g in t["guardrails"]],
             "replies": run.replies,
+            "raw_replies": run.raw_replies,
             "seconds": round(time.perf_counter() - started, 1),
         }
 

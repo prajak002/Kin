@@ -49,6 +49,12 @@ def emergency_in(text: str) -> str | None:
     return match.group(0) if match else None
 
 
+# "Please don't double the dose" is the safe answer, not advice to do it.
+NEGATED = re.compile(r"\b(?:don'?t|do not|never|shouldn'?t|should not|must not|not to|avoid|no need to)\W+(?:\w+\W+){0,2}$", re.IGNORECASE)
+
+
 def dosing_advice_in(reply: str) -> str | None:
-    match = DOSING.search(reply)
-    return match.group(0) if match else None
+    for match in DOSING.finditer(reply):
+        if not NEGATED.search(reply[max(0, match.start() - 40):match.start()]):
+            return match.group(0)
+    return None
