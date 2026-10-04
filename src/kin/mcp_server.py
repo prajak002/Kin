@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import date, timedelta
 from typing import Annotated, Literal
@@ -18,6 +19,7 @@ from .reminiscence import Person, build_set
 from .store import local_date, open_store
 
 load_dotenv()
+log = logging.getLogger("kin.mcp")
 
 LOW_MOOD = 2
 
@@ -52,26 +54,28 @@ def raise_alert(person: dict, level: str, reason: str) -> dict:
 @server.tool()
 def register_person(
     person_id: str,
-    name: str,
-    birth_year: int,
-    hometown: str,
+    name: str | None = None,
+    birth_year: int | None = None,
+    hometown: str | None = None,
     language: str | None = None,
     favourites: list[str] | None = None,
     medications: list[str] | None = None,
     lives_in: str | None = None,
 ) -> dict:
-    """Create or update the profile of the person Kin looks after. hometown is where
-    they grew up; lives_in is the town they live in now, if different."""
-    return store.upsert_person(
-        person_id,
-        name=name,
-        birth_year=birth_year,
-        hometown=hometown,
-        language=language,
-        favourites=favourites or [],
-        medications=medications or [],
-        lives_in=lives_in or hometown,
-    )
+    """Create the profile of the person Kin looks after, or update parts of it.
+    A new person needs name, birth_year and hometown; an update sends only what
+    changed. hometown is where they grew up; lives_in is where they live now."""
+    existing = store.get_person(person_id)
+    if existing is None and not (name and birth_year and hometown):
+        raise ToolError("A new person needs name, birth_year and hometown.")
+    given = {"name": name, "birth_year": birth_year, "hometown": hometown, "language": language,
+             "favourites": favourites, "medications": medications, "lives_in": lives_in}
+    fields = {k: v for k, v in given.items() if v is not None}
+    if existing is None:
+        fields.setdefault("favourites", [])
+        fields.setdefault("medications", [])
+        fields.setdefault("lives_in", hometown)
+    return store.upsert_person(person_id, **fields)
 
 
 @server.tool()
@@ -151,7 +155,11 @@ def save_memory(person_id: str, fact: str) -> dict:
     their life. fact: one short sentence in English, e.g. "Her husband Arun was a
     schoolteacher in Shillong." Without this, it is forgotten after today."""
     _require_person(person_id)
-    return memory.open_memory(store).remember(person_id, fact.strip())
+    try:
+        return memory.open_memory(store).remember(person_id, fact.strip())
+    except Exception as e:
+        log.exception("save_memory failed")
+        raise ToolError(f"Memory is unavailable right now ({type(e).__name__}).") from e
 
 
 @server.tool()
@@ -159,7 +167,11 @@ def search_memories(person_id: str, about: str) -> list[dict]:
     """READ details the person shared in earlier conversations about a topic, person
     or place. Use when they ask "do you remember…" or bring up someone again."""
     _require_person(person_id)
-    return memory.open_memory(store).recall(person_id, about)
+    try:
+        return memory.open_memory(store).recall(person_id, about)
+    except Exception as e:
+        log.exception("search_memories failed")
+        raise ToolError(f"Memory is unavailable right now ({type(e).__name__}).") from e
 
 
 @server.tool()

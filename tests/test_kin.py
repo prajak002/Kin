@@ -455,3 +455,42 @@ def test_memory_store_and_vector(tmp_path, monkeypatch):
     assert vm.recall("asha", "hills")[0]["score"] == 0.91
     assert calls[0][1][0]["vector"] == [0.1, 0.2] and calls[0][1][0]["metadata"]["fact"] == "Lived in Shillong"
     assert calls[1][1]["filter"] == "person_id = 'asha'"
+
+
+def test_register_person_partial_update(tmp_path, monkeypatch):
+    from mcp.server.mcpserver.exceptions import ToolError as TE
+
+    from kin import mcp_server
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    with pytest.raises(TE, match="needs name"):
+        mcp_server.register_person("asha", name="Asha")
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+    p = mcp_server.register_person("asha", favourites=["Satyajit Ray"])
+    assert (p["birth_year"], p["hometown"], p["lives_in"], p["favourites"]) == (1948, "Kolkata", "Kolkata", ["Satyajit Ray"])
+
+
+def test_failed_model_call_still_escalates(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+
+    from kin import mcp_server, server
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    monkeypatch.delenv("KIN_API_TOKEN", raising=False)
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+
+    async def broken(*a, **k):
+        raise RuntimeError("model API error")
+
+    async def no_tools():
+        return []
+
+    monkeypatch.setattr(server, "run_turn", broken)
+    monkeypatch.setattr(server, "inprocess_tools", no_tools)
+    monkeypatch.setattr(server, "notify_family", lambda *a: [])
+    with TestClient(server.create_app()) as client:
+        ok = client.post("/invocations", json={"prompt": "Tell me a story", "person_id": "asha"})
+        assert ok.status_code == 200 and "say it again" in ok.json()["reply"]
+        fall = client.post("/invocations", json={"prompt": "I fell and can't get up", "person_id": "asha"})
+        assert "family know" in fall.json()["reply"]
+    assert mcp_server.store.recent("alerts", "asha")[-1]["level"] == "urgent"

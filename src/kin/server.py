@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 
 import httpx
@@ -24,7 +25,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from strands import Agent
 
-from . import family_agent, mcp_server
+from . import family_agent, guardrails, mcp_server
 from .agent import build_agent, inprocess_tools
 from . import conditions
 from .format import status_text
@@ -32,6 +33,7 @@ from .notify import notify_family, send_whatsapp_text
 from .turns import run_turn
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+log = logging.getLogger("kin.server")
 
 server = mcp_server.server
 _tools: list | None = None
@@ -60,7 +62,16 @@ async def invocations(request: Request) -> Response:
         agent = build_agent(person_id, tools=_tools, quiet=True, messages=store.load_chat(key))
     else:
         agent = _agents.get(key) or _agents.setdefault(key, build_agent(person_id, tools=_tools, quiet=True))
-    turn = await run_turn(agent, prompt, person_id=person_id, channel=payload.get("channel", "voice"), raise_alert=_urgent)
+    try:
+        turn = await run_turn(agent, prompt, person_id=person_id, channel=payload.get("channel", "voice"), raise_alert=_urgent)
+    except Exception:
+        # The model call failed (rate limit, a malformed tool call). The turn is traced as an
+        # error; the person hears an apology instead of silence. Emergencies still escalate.
+        log.exception("agent turn failed")
+        if guardrails.emergency_in(prompt):
+            _urgent(person_id, f"Possible emergency: the person said “{guardrails.emergency_in(prompt)}”. Please check on them now.")
+            return JSONResponse({"reply": "I didn't quite manage that, but I've let your family know right away. If you can, call emergency services."})
+        return JSONResponse({"reply": "Sorry, I missed that. Could you say it again?"})
     if hasattr(store, "save_chat"):
         store.save_chat(key, agent.messages)
     return JSONResponse({"reply": turn.reply, "trace": turn.trace})
