@@ -72,6 +72,7 @@ async def test_mcp_low_mood_raises_alert(tmp_path, monkeypatch):
     out = mcp_server.daily_checkin("asha", 2, "slept badly")
     assert out["alert"]["level"] == "warning"
     assert mcp_server.wellbeing_summary("asha")["average_mood"] == 2
+    assert [p["name"] for p in mcp_server.list_people()] == ["Asha"]
 
     with pytest.raises(ToolError, match="register_person"):
         mcp_server.daily_checkin("nobody", 4)

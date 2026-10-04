@@ -71,6 +71,12 @@ def register_person(
 
 
 @server.tool()
+def list_people() -> list[dict]:
+    """Everyone Kin looks after, with their profiles."""
+    return store.list_people()
+
+
+@server.tool()
 def daily_checkin(
     person_id: str,
     mood: Annotated[int, Field(ge=1, le=5, description="1 = very low, 5 = very good")],

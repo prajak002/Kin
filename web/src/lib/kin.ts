@@ -1,0 +1,83 @@
+import "server-only";
+import "./env";
+
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+// The dashboard reads Kin's data through the same MCP server Alexa+ uses.
+const MCP_URL = process.env.KIN_MCP_URL || "http://127.0.0.1:8000/mcp";
+const AGENT_URL = process.env.KIN_AGENT_URL || "http://127.0.0.1:8080/invocations";
+
+export type Person = {
+  id: string;
+  name: string;
+  birth_year: number;
+  hometown: string;
+  language?: string | null;
+  favourites: string[];
+  medications: string[];
+};
+
+export type Checkin = { at: string; mood: number; notes: string };
+export type Dose = { at: string; medication: string; taken: boolean };
+export type Alert = { at: string; level: "info" | "warning" | "urgent"; reason: string };
+export type Moment = { at: string; topic: string; items: string[] };
+
+export type Summary = {
+  name: string;
+  average_mood: number | null;
+  checkins: Checkin[];
+  doses: Dose[];
+  missed_doses: Dose[];
+  alerts: Alert[];
+  moments: Moment[];
+};
+
+export class KinOffline extends Error {}
+
+async function callTool<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  const client = new Client({ name: "kin-web", version: "0.1.0" });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(MCP_URL)));
+  } catch (e) {
+    throw new KinOffline(`Kin's MCP server is not reachable at ${MCP_URL}`, { cause: e });
+  }
+  try {
+    const result = await client.callTool({ name, arguments: args });
+    const text = (result.content as { type: string; text?: string }[]).find((c) => c.type === "text")?.text ?? "";
+    if (result.isError) throw new Error(text || `${name} failed`);
+    // Python tools returning a list are wrapped as {result: [...]}; dicts arrive as JSON text.
+    const structured = result.structuredContent as Record<string, unknown> | undefined;
+    if (structured && "result" in structured) return structured.result as T;
+    return (structured ?? JSON.parse(text)) as T;
+  } finally {
+    await client.close();
+  }
+}
+
+export const listPeople = () => callTool<Person[]>("list_people");
+
+export const getPerson = async (id: string) => (await listPeople()).find((p) => p.id === id) ?? null;
+
+export const wellbeing = (personId: string, days = 7) =>
+  callTool<Summary>("wellbeing_summary", { person_id: personId, days });
+
+export async function askKin(prompt: string, personId: string, sessionId: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(AGENT_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // AgentCore's session header: the agent keeps one conversation per session.
+        "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": sessionId,
+      },
+      body: JSON.stringify({ prompt, person_id: personId }),
+    });
+  } catch (e) {
+    throw new KinOffline(`Kin's agent is not reachable at ${AGENT_URL}`, { cause: e });
+  }
+  const data = (await res.json()) as { reply?: string; error?: string };
+  if (!res.ok || data.error) throw new Error(data.error || `agent returned ${res.status}`);
+  return data.reply ?? "";
+}

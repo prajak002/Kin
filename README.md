@@ -13,7 +13,7 @@ the music and films of the person's youth, and keeps their family informed.
 | Strands agent (open-weight models via Ollama or any OpenAI-compatible host) | done, AgentCore packaging ready |
 | Voice loop (Whisper in, Orpheus or macOS `say` out) | done |
 | WhatsApp / SMS / SES family channel | planned |
-| Family dashboard and simulated Alexa+ (Next.js) | planned |
+| Family dashboard and smart-speaker simulator (Next.js, `web/`) | done |
 | AWS CDK deployment | planned |
 
 ## Run
@@ -47,6 +47,18 @@ Set `KIN_TABLE` to store data in DynamoDB instead of the local JSON file
 
 ```sh
 uv run python -c "from kin.dynamo import create_table; create_table('kin')"
+```
+
+### Web app
+
+`web/` is a Next.js app with a family dashboard (mood over the week, missed
+doses, alerts, memories) and a page that stands in for a smart speaker: tap to
+talk, Whisper transcribes, Kin answers out loud. It reads data through the MCP
+server and talks through the agent, and shares the project's `.env`.
+
+```sh
+cd web && pnpm install && cd ..
+scripts/dev.sh               # MCP :8000, agent :8080, web http://localhost:3000
 ```
 
 Family alerts go to the ntfy topic in `KIN_NTFY_TOPIC`. Without a Qloo key,

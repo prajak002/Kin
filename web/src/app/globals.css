@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --surface: #f7f5f0;
+  --card: #fcfcfb;
+  --ink: #1d1c1a;
+  --ink-2: #52514e;
+  --ink-3: #7a7873;
+  --line: #e4e1d9;
+  --accent: #b4532a;
+  --accent-soft: #f6e6dc;
+  /* Mood bars: one series, one hue (validated sequential blue). */
+  --mood: #2a78d6;
+  --mood-track: #ebe8e1;
+  /* Status colours, always shown with an icon and label. */
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #141413;
+    --card: #1a1a19;
+    --ink: #f3f2ee;
+    --ink-2: #c3c2b7;
+    --ink-3: #8f8e86;
+    --line: #2e2e2b;
+    --accent: #e08a5f;
+    --accent-soft: #3a2a21;
+    --mood: #3987e5;
+    --mood-track: #2a2a27;
+  }
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-mood: var(--mood);
+  --color-mood-track: var(--mood-track);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-critical: var(--critical);
+  --font-sans: var(--font-geist-sans);
+  --font-display: var(--font-fraunces);
+}
+
+body {
+  background: var(--surface);
+  color: var(--ink);
+}
