@@ -26,6 +26,7 @@ const ACTION_COLOR: Record<string, string> = {
   reminiscence: "var(--good)",
   message: "var(--good)",
   greeting: "var(--mood)",
+  fact: "var(--mood)",
   weather: "var(--warning)",
 };
 

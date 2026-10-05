@@ -660,3 +660,18 @@ def test_family_agent_passes_messages(tmp_path, monkeypatch):
     assert pass_message._tool_func("asha", "I'll call you tonight, Ma") == {"passed_on_to": "Asha"}
     [note] = mcp_server.family_messages("asha")
     assert (note["sender"], note["text"], note["audio"]) == ("Meera", "I'll call you tonight, Ma", None)
+
+
+async def test_look_up_returns_matching_passages():
+    from kin import facts
+
+    def handler(request):
+        assert request.url.params["srsearch"] == "national animal of India"
+        return httpx.Response(200, json={"query": {
+            "search": [{"title": "Tigers in India", "snippet": "Tigers are the <span class=\"searchmatch\">national animal</span> there"}],
+            "pages": [{"title": "Tigers in India", "extract": "Tigers in India constituted more than 75% of the global tiger population."}],
+        }})
+
+    [hit] = await facts.look_up("national animal of India", transport=httpx.MockTransport(handler))
+    assert hit["passage"] == "Tigers are the national animal there"
+    assert hit["intro"].startswith("Tigers in India")

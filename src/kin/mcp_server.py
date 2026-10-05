@@ -13,7 +13,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
-from . import conditions, inbox, memory, reminders
+from . import conditions, facts, inbox, memory, reminders
 from .notify import notify_family, send_family_text
 from .reminiscence import Person, build_set
 from .store import local_date, open_store
@@ -243,6 +243,17 @@ async def local_conditions(person_id: str) -> dict:
         return await conditions.local_conditions(person.get("lives_in") or person["hometown"])
     except (ValueError, httpx.HTTPError) as e:
         raise ToolError(f"Weather is unavailable right now ({e}).") from e
+
+
+@server.tool()
+async def look_up(question: Annotated[str, Field(description='a short English search, e.g. "national animal of India"')]) -> list[dict]:
+    """Check a general fact (history, geography, science, people, films, dates) on
+    Wikipedia before answering it. Returns the top articles with the passage that
+    matched and their first sentences."""
+    try:
+        return await facts.look_up(question)
+    except httpx.HTTPError as e:
+        raise ToolError("Wikipedia is unreachable right now; say you're not sure rather than guess.") from e
 
 
 @server.tool()
