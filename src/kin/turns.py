@@ -31,6 +31,34 @@ log = logging.getLogger("kin.turns")
 class Turn:
     reply: str
     trace: dict[str, Any] = field(default_factory=dict)
+    # What Kin did this turn, in plain words, for the person's screen. Unlike the
+    # trace these can name a medication or a memory, so they are never logged.
+    actions: list[dict[str, str]] = field(default_factory=list)
+
+
+def _action(name: str, args: dict[str, Any]) -> dict[str, str] | None:
+    """A tool call as a card for the chat: {kind, text}."""
+    level = args.get("level", "warning")
+    match name:
+        case "daily_checkin":
+            return {"kind": "checkin", "text": f"Logged today's mood: {args.get('mood')}/5"}
+        case "log_medication":
+            taken = "taken" if args.get("taken") else "missed"
+            return {"kind": "medication", "text": f"Logged {args.get('medication', 'a dose')}: {taken}"}
+        case "alert_family":
+            kind = "scam" if str(args.get("reason", "")).lower().startswith("possible scam") else "alert"
+            return {"kind": kind, "text": f"Told the family ({level}): {args.get('reason', '')}".strip()}
+        case "save_memory":
+            return {"kind": "memory", "text": f"Remembered: {args.get('fact', '')}"}
+        case "search_memories":
+            return {"kind": "memory", "text": f"Looked back through memories about {args.get('about', 'that')}"}
+        case "start_reminiscence":
+            return {"kind": "reminiscence", "text": "Found films and songs from their younger years"}
+        case "local_conditions":
+            return {"kind": "weather", "text": "Checked today's weather and air"}
+        case "register_person":
+            return {"kind": "profile", "text": "Updated their profile"}
+    return None
 
 
 def _tool_calls(messages: list[dict]) -> list[dict[str, Any]]:
@@ -85,11 +113,14 @@ async def run_turn(
         trace["guardrails"].append({"rule": "dosing_advice", "action": "replaced_reply", "matched": advice})
         reply = guardrails.SAFE_DOSING_REPLY
 
+    actions = [a for c in calls if c["ok"] and (a := _action(c["name"], c["input"]))]
+
     if (emergency := guardrails.emergency_in(text)) is not None:
         alerted = any(c["name"] == "alert_family" and c["ok"] and c["input"].get("level") == "urgent" for c in calls)
         if not alerted and raise_alert is not None:
             raise_alert(person_id, f"Possible emergency: the person said “{emergency}”. Please check on them now.")
             trace["guardrails"].append({"rule": "emergency", "action": "raised_urgent_alert", "matched": emergency})
+            actions.append({"kind": "alert", "text": "Safety check: told the family right away (urgent)"})
             reply = f"{reply} I've also let your family know right away.".strip()
         else:
             trace["guardrails"].append({"rule": "emergency", "action": "model_already_alerted", "matched": emergency})
@@ -97,7 +128,7 @@ async def run_turn(
     trace["latency_ms"] = round((time.perf_counter() - started) * 1000)
     trace["reply_chars"] = len(reply)
     _record(trace)
-    return Turn(reply, trace)
+    return Turn(reply, trace, actions)
 
 
 def _record(trace: dict[str, Any]) -> None:

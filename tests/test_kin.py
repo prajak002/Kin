@@ -494,3 +494,19 @@ def test_failed_model_call_still_escalates(tmp_path, monkeypatch):
         fall = client.post("/invocations", json={"prompt": "I fell and can't get up", "person_id": "asha"})
         assert "family know" in fall.json()["reply"]
     assert mcp_server.store.recent("alerts", "asha")[-1]["level"] == "urgent"
+
+
+async def test_run_turn_reports_actions(tmp_path, monkeypatch):
+    from kin import mcp_server
+    from kin.turns import run_turn
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    calls = [("daily_checkin", {"mood": 2}), ("log_medication", {"medication": "Metformin", "taken": True}),
+             ("alert_family", {"level": "warning", "reason": "Possible scam: a caller asked for her OTP"})]
+    turn = await run_turn(StubAgent("Thank you for telling me.", calls), "hi", person_id="asha")
+    assert [a["kind"] for a in turn.actions] == ["checkin", "medication", "scam"]
+    assert turn.actions[1]["text"] == "Logged Metformin: taken"
+    assert "Metformin" not in json.dumps(turn.trace)  # actions name things; traces don't
+
+    turn = await run_turn(StubAgent("Oh dear."), "I fell down", person_id="asha", raise_alert=lambda *a: None)
+    assert turn.actions[-1]["kind"] == "alert"

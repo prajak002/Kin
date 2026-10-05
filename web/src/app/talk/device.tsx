@@ -4,7 +4,34 @@ import { useEffect, useRef, useState } from "react";
 
 import { speak, startHandsFree, stopSpeaking } from "./speech";
 
-type Message = { id: string; role: "you" | "kin"; text: string; meta?: string };
+type Action = { kind: string; text: string };
+type Message = { id: string; role: "you" | "kin"; text: string; meta?: string; actions?: Action[] };
+
+// A coloured dot per kind of action, from the theme's palette.
+const ACTION_COLOR: Record<string, string> = {
+  alert: "var(--critical)",
+  scam: "var(--critical)",
+  medication: "var(--accent)",
+  reminder: "var(--accent)",
+  checkin: "var(--mood)",
+  memory: "var(--good)",
+  reminiscence: "var(--good)",
+  message: "var(--good)",
+  weather: "var(--warning)",
+};
+
+function ActionCards({ actions }: { actions: Action[] }) {
+  return (
+    <ul className="mt-1.5 flex max-w-[85%] flex-col gap-1">
+      {actions.map((a, i) => (
+        <li key={i} className="flex items-start gap-2 rounded-lg border border-line bg-card px-2.5 py-1.5 text-xs text-ink-2">
+          <span aria-hidden className="mt-1 size-2 shrink-0 rounded-full" style={{ background: ACTION_COLOR[a.kind] ?? "var(--ink-3)" }} />
+          {a.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
 type Status = "idle" | "listening" | "transcribing" | "thinking" | "speaking";
 type Trace = { latency_ms?: number; tools?: { name: string }[]; guardrails?: { rule: string; action: string }[] };
 
@@ -105,10 +132,10 @@ export function Device({ people }: { people: { id: string; name: string; languag
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text, personId: id, sessionId: sessionFor(id) }),
       });
-      const data = (await res.json()) as { reply?: string; trace?: Trace; error?: string };
+      const data = (await res.json()) as { reply?: string; trace?: Trace; actions?: Action[]; error?: string };
       if (!res.ok || !data.reply) throw new Error(data.error || "Kin didn't answer");
       const replyId = crypto.randomUUID();
-      setMessages((m) => [...m, { id: replyId, role: "kin", text: data.reply! }]);
+      setMessages((m) => [...m, { id: replyId, role: "kin", text: data.reply!, actions: data.actions }]);
       busy.current = false;
       if (settings.current.speakReplies) {
         setStatus("speaking");
@@ -315,6 +342,7 @@ export function Device({ people }: { people: { id: string; name: string; languag
               >
                 {m.text}
               </p>
+              {m.actions && m.actions.length > 0 && <ActionCards actions={m.actions} />}
               {m.meta && <span className="mt-1 px-1 text-[11px] text-ink-3">{m.meta}</span>}
             </div>
           ))}

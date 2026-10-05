@@ -74,7 +74,7 @@ async def invocations(request: Request) -> Response:
         return JSONResponse({"reply": "Sorry, I missed that. Could you say it again?"})
     if hasattr(store, "save_chat"):
         store.save_chat(key, agent.messages)
-    return JSONResponse({"reply": turn.reply, "trace": turn.trace})
+    return JSONResponse({"reply": turn.reply, "trace": turn.trace, "actions": turn.actions})
 
 
 def _urgent(person_id: str, reason: str) -> None:
