@@ -14,9 +14,12 @@ export async function POST(request: Request) {
   const form = new FormData();
   form.append("file", audio, `speech.${ext}`);
   form.append("model", process.env.KIN_STT_MODEL || "whisper-large-v3-turbo");
-  // verbose_json includes the detected language; Hindi and Bengali work out of the box.
+  // verbose_json includes the detected language. Auto-detection often hears
+  // Bengali as Hindi, so the talk page passes the language the person speaks.
   form.append("response_format", "verbose_json");
-  if (process.env.KIN_STT_LANGUAGE) form.append("language", process.env.KIN_STT_LANGUAGE);
+  const asked = new URL(request.url).searchParams.get("language");
+  const language = asked && /^[a-z]{2}$/.test(asked) ? asked : process.env.KIN_STT_LANGUAGE;
+  if (language) form.append("language", language);
 
   const res = await fetch(`${base}/audio/transcriptions`, {
     method: "POST",

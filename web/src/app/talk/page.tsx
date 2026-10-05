@@ -26,7 +26,7 @@ export default async function TalkPage() {
           records shows up on the family page.
         </p>
       </div>
-      <Device people={people.map((p) => ({ id: p.id, name: p.name }))} />
+      <Device people={people.map((p) => ({ id: p.id, name: p.name, language: p.language }))} />
     </div>
   );
 }

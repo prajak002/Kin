@@ -16,6 +16,23 @@ const STATUS_TEXT: Record<Status, string> = {
   speaking: "Kin is speaking… (talk to interrupt)",
 };
 
+// Whisper often hears Bengali as Hindi and writes it in Devanagari; naming the
+// language fixes that. "" lets Whisper detect it.
+const LANGUAGES = [
+  { code: "", label: "Detect automatically" },
+  { code: "en", label: "English" },
+  { code: "hi", label: "हिन्दी · Hindi" },
+  { code: "bn", label: "বাংলা · Bengali" },
+];
+
+function languageCode(language?: string | null): string {
+  const l = (language ?? "").toLowerCase();
+  if (l.startsWith("ben") || l === "bn" || l === "bangla") return "bn";
+  if (l.startsWith("hin") || l === "hi") return "hi";
+  if (l.startsWith("eng") || l === "en") return "en";
+  return "";
+}
+
 const slug = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 function describe(trace: Trace | undefined, voice: string): string {
@@ -28,8 +45,9 @@ function describe(trace: Trace | undefined, voice: string): string {
   return parts.join(" · ");
 }
 
-export function Device({ people }: { people: { id: string; name: string }[] }) {
+export function Device({ people }: { people: { id: string; name: string; language?: string | null }[] }) {
   const [selected, setSelected] = useState(people[0]?.id ?? "__new");
+  const [lang, setLang] = useState(languageCode(people[0]?.language));
   const [newName, setNewName] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<Status>("idle");
@@ -48,12 +66,12 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
   const bottom = useRef<HTMLDivElement>(null);
   const personId = selected === "__new" ? slug(newName) : selected;
   // Hands-free callbacks outlive renders, so they read current settings from refs.
-  const settings = useRef({ speakReplies, natural });
+  const settings = useRef({ speakReplies, natural, lang });
   const personRef = useRef(personId);
   useEffect(() => {
-    settings.current = { speakReplies, natural };
+    settings.current = { speakReplies, natural, lang };
     personRef.current = personId;
-  }, [speakReplies, natural, personId]);
+  }, [speakReplies, natural, lang, personId]);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -79,7 +97,7 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
     }
     busy.current = true;
     setError(null);
-    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "you", text, meta: language && language !== "english" ? language : undefined }]);
+    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "you", text, meta: language && language.toLowerCase() !== "english" ? language : undefined }]);
     setStatus("thinking");
     try {
       const res = await fetch("/api/chat", {
@@ -111,7 +129,8 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
     busy.current = true; // claim the turn before transcribing, so a second utterance can't slip in
     setStatus("transcribing");
     try {
-      const res = await fetch("/api/transcribe", { method: "POST", headers: { "content-type": audio.type }, body: audio });
+      const { lang } = settings.current;
+      const res = await fetch(`/api/transcribe${lang ? `?language=${lang}` : ""}`, { method: "POST", headers: { "content-type": audio.type }, body: audio });
       const data = (await res.json()) as { text?: string; language?: string | null; error?: string };
       if (!res.ok) throw new Error(data.error || "Couldn't hear that");
       await send(data.text ?? "", data.language);
@@ -181,7 +200,10 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
           <span className="text-ink-3">Talking as</span>
           <select
             value={selected}
-            onChange={(e) => setSelected(e.target.value)}
+            onChange={(e) => {
+              setSelected(e.target.value);
+              setLang(languageCode(people.find((p) => p.id === e.target.value)?.language));
+            }}
             className="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2"
           >
             {people.map((p) => (
@@ -200,6 +222,20 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
             className="-mt-2 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
           />
         )}
+        <label className="w-full text-sm">
+          <span className="text-ink-3">Speaking in</span>
+          <select
+            value={lang}
+            onChange={(e) => setLang(e.target.value)}
+            className="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2"
+          >
+            {LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <button
           type="button"
