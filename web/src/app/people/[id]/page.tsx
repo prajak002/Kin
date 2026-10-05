@@ -5,9 +5,10 @@ import { connection } from "next/server";
 import { MoodChart, type MoodDay } from "@/components/mood-chart";
 import { AlertBadge, Card, Offline } from "@/components/ui";
 import { age, dayKey, timeAgo } from "@/lib/format";
-import { KinOffline, getPerson, wellbeing, type Summary } from "@/lib/kin";
+import { KinOffline, getPerson, medicationReminders, wellbeing, type Summary } from "@/lib/kin";
 
 import { FamilyContacts } from "./family";
+import { Medicines } from "./medicines";
 
 function moodDays(summary: Summary): MoodDay[] {
   return Array.from({ length: 7 }, (_, i) => {
@@ -40,9 +41,9 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
   await connection();
   const { id } = await params;
 
-  let person, summary;
+  let person, summary, doses;
   try {
-    [person, summary] = await Promise.all([getPerson(id), wellbeing(id)]);
+    [person, summary, doses] = await Promise.all([getPerson(id), wellbeing(id), medicationReminders(id)]);
   } catch (e) {
     if (e instanceof KinOffline) return <Offline message={e.message} />;
     if (e instanceof Error && e.message.includes("Unknown person")) notFound();
@@ -108,6 +109,14 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
           </dl>
         </Card>
       </div>
+
+      <Card>
+        <h2 className="font-display text-xl">Medicines today</h2>
+        <p className="mb-4 text-sm text-ink-3">
+          Kin reminds {person.name} at each time and tells the family if a dose isn&apos;t confirmed within 45 minutes.
+        </p>
+        <Medicines personId={person.id} personName={person.name} schedule={person.schedule ?? []} today={doses.today} />
+      </Card>
 
       <Card>
         <h2 className="font-display text-xl">Who Kin tells</h2>

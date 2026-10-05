@@ -542,3 +542,62 @@ async def test_scam_guardrail_alerts_family_once(tmp_path, monkeypatch):
     await run_turn(StubAgent("Hang up.", [("alert_family", {"level": "warning", "reason": "Possible scam: OTP"})]),
                    "Someone wants my OTP", person_id="asha", raise_alert=lambda *a: alerts.append(a))
     assert len(alerts) == 1
+
+
+def test_medication_reminders(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    from kin import mcp_server, reminders
+
+    store = Store(tmp_path / "s.json")
+    monkeypatch.setattr(mcp_server, "store", store)
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+    person = mcp_server.set_medication_schedule("asha", "Metformin", ["8:00", "20:00"])
+    assert person["schedule"] == [{"medication": "Metformin", "times": ["08:00", "20:00"]}]
+    assert "Metformin" in person["medications"]
+    with pytest.raises(ToolError, match="isn't a time"):
+        mcp_server.set_medication_schedule("asha", "Metformin", ["8am"])
+
+    alerts = []
+    fake_alert = lambda p, level, reason: alerts.append((level, reason))  # noqa: E731
+    ist = lambda h, m: datetime(2026, 10, 5, h, m, tzinfo=reminders.tz(person)).astimezone(timezone.utc)  # noqa: E731
+
+    early = reminders.check(person, store, ist(7, 30), fake_alert)
+    assert early["due"] == [] and [d["status"] for d in early["today"]] == ["upcoming", "upcoming"]
+
+    # 08:05: remind once; asking again doesn't repeat it.
+    assert reminders.check(person, store, ist(8, 5), fake_alert)["due"] == [{"medication": "Metformin", "time": "08:00"}]
+    assert reminders.check(person, store, ist(8, 6), fake_alert)["due"] == []
+
+    # 08:50, still not confirmed: family told once.
+    assert reminders.check(person, store, ist(8, 50), fake_alert)["escalated"]
+    reminders.check(person, store, ist(8, 55), fake_alert)
+    assert len(alerts) == 1 and "08:00 Metformin" in alerts[0][1]
+
+    # A dose logged in the person's words counts for the evening slot.
+    store.add_dose("asha", "my metformin tablet", True, at=ist(20, 10).isoformat(timespec="seconds"))
+    evening = reminders.check(person, store, ist(20, 15), fake_alert)
+    assert evening["due"] == [] and evening["today"][1]["status"] == "taken"
+    assert evening["today"][0]["status"] == "waiting"
+
+
+def test_same_medication():
+    from kin.reminders import same_medication
+
+    assert same_medication("Metformin", "metformin 500 mg")
+    assert same_medication("Amlodipine 5mg", "amlodipine")
+    assert not same_medication("Metformin", "Amlodipine")
+
+
+def test_reminders_peek_changes_nothing(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    from kin import mcp_server, reminders
+
+    store = Store(tmp_path / "s.json")
+    monkeypatch.setattr(mcp_server, "store", store)
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+    person = mcp_server.set_medication_schedule("asha", "Metformin", ["08:00"])
+    at = datetime(2026, 10, 5, 9, 0, tzinfo=reminders.tz(person)).astimezone(timezone.utc)
+    peek = reminders.check(person, store, at, lambda *a: pytest.fail("peeking must not alert"), deliver=False)
+    assert peek["today"][0]["status"] == "waiting" and peek["due"] == [] and not store.recent("reminders", "asha")

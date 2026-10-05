@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-TABLES = ("checkins", "doses", "alerts", "moments", "traces", "memories")
+TABLES = ("checkins", "doses", "alerts", "moments", "traces", "memories", "reminders", "inbox")
 MAX_TRACES = 500
 
 
@@ -78,6 +78,9 @@ class Store:
 
     def add_moment(self, person_id: str, topic: str, items: list[str], at: str | None = None) -> dict[str, Any]:
         return self._append("moments", {"person_id": person_id, "topic": topic, "items": items, "at": at})
+
+    def add_row(self, table: str, person_id: str, **fields: Any) -> dict[str, Any]:
+        return self._append(table, {"person_id": person_id, **fields})
 
     def today(self, table: str, person_id: str) -> list[dict[str, Any]]:
         today = date.today()

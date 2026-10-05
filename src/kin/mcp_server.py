@@ -13,7 +13,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
-from . import conditions, memory
+from . import conditions, memory, reminders
 from .notify import notify_family
 from .reminiscence import Person, build_set
 from .store import local_date, open_store
@@ -131,6 +131,36 @@ def log_medication(person_id: str, medication: str, taken: bool) -> dict:
     if not taken:
         alert = raise_alert(person, "info", f"{person['name']} skipped {medication}.")
     return {"dose": dose, "alert": alert}
+
+
+@server.tool()
+def set_medication_schedule(
+    person_id: str,
+    medication: str,
+    times: Annotated[list[str], Field(description='times of day in 24-hour HH:MM, e.g. ["08:00", "20:00"]; empty to stop reminders')],
+) -> dict:
+    """Set when the person takes a medication, so Kin reminds them at those times
+    and tells family if a dose isn't confirmed."""
+    person = _require_person(person_id)
+    try:
+        times = sorted({reminders.normalise_time(t) for t in times})
+    except ValueError as e:
+        raise ToolError(str(e)) from e
+    schedule = [e for e in person.get("schedule") or [] if not reminders.same_medication(e["medication"], medication)]
+    if times:
+        schedule.append({"medication": medication.strip(), "times": times})
+    medications = person.get("medications") or []
+    if times and not any(reminders.same_medication(m, medication) for m in medications):
+        medications = [*medications, medication.strip()]
+    return store.upsert_person(person_id, schedule=schedule, medications=medications)
+
+
+@server.tool()
+def medication_reminders(person_id: str, deliver: bool = False) -> dict:
+    """Today's scheduled doses with their status (taken, missed, waiting, upcoming).
+    Kin's device passes deliver=true to also get the reminders due now (each is
+    returned once) and to tell family about doses still unconfirmed."""
+    return reminders.check(_require_person(person_id), store, raise_alert=raise_alert, deliver=deliver)
 
 
 @server.tool()

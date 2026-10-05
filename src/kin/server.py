@@ -28,6 +28,7 @@ from strands import Agent
 from . import family_agent, guardrails, mcp_server
 from .agent import build_agent, inprocess_tools
 from . import conditions
+from . import reminders
 from .format import status_text
 from .notify import notify_family, send_whatsapp_text
 from .turns import run_turn
@@ -136,6 +137,7 @@ async def daily(request: Request) -> Response:
 
     store, report = mcp_server.store, []
     for person in store.list_people():
+        reminders.check(person, store, raise_alert=mcp_server.raise_alert)  # tell family about unconfirmed doses
         summary = mcp_server.wellbeing_summary(person["id"], days=1)
         lines = [status_text(person, summary)]
         level = "info"

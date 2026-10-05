@@ -22,7 +22,12 @@ export type Person = {
   favourites: string[];
   medications: string[];
   family: Contact[];
+  schedule?: { medication: string; times: string[] }[];
+  timezone?: string;
 };
+
+export type DoseSlot = { medication: string; time: string; status: "taken" | "missed" | "waiting" | "upcoming" };
+export type Reminders = { today: DoseSlot[]; due: { medication: string; time: string }[]; escalated: unknown[] };
 
 export type Checkin = { at: string; mood: number; notes: string };
 export type Dose = { at: string; medication: string; taken: boolean };
@@ -79,6 +84,13 @@ export const removeContact = (personId: string, channel: string, address: string
   callTool<Person>("remove_family_contact", { person_id: personId, channel, address });
 
 export type Action = { kind: string; text: string };
+
+export const setSchedule = (personId: string, medication: string, times: string[]) =>
+  callTool<Person>("set_medication_schedule", { person_id: personId, medication, times });
+
+/** Today's doses; with deliver, also the reminders due now (each returned once). */
+export const medicationReminders = (personId: string, deliver = false) =>
+  callTool<Reminders>("medication_reminders", { person_id: personId, deliver });
 
 export async function askKin(
   prompt: string,

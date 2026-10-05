@@ -111,7 +111,9 @@ export function Device({ people }: { people: { id: string; name: string; languag
     return sessions.current[id];
   }
 
-  async function send(text: string, language?: string | null) {
+  /** Send a turn. With `prompt`, the text is an instruction from the device
+   *  (shown only as an action card), not something the person said. */
+  async function send(text: string, language?: string | null, prompt?: Action) {
     const id = personRef.current;
     if (!text.trim()) {
       busy.current = false;
@@ -124,7 +126,10 @@ export function Device({ people }: { people: { id: string; name: string; languag
     }
     busy.current = true;
     setError(null);
-    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "you", text, meta: language && language.toLowerCase() !== "english" ? language : undefined }]);
+    if (!prompt) {
+      const meta = language && language.toLowerCase() !== "english" ? language : undefined;
+      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "you", text, meta }]);
+    }
     setStatus("thinking");
     try {
       const res = await fetch("/api/chat", {
@@ -135,7 +140,8 @@ export function Device({ people }: { people: { id: string; name: string; languag
       const data = (await res.json()) as { reply?: string; trace?: Trace; actions?: Action[]; error?: string };
       if (!res.ok || !data.reply) throw new Error(data.error || "Kin didn't answer");
       const replyId = crypto.randomUUID();
-      setMessages((m) => [...m, { id: replyId, role: "kin", text: data.reply!, actions: data.actions }]);
+      const actions = prompt ? [prompt, ...(data.actions ?? [])] : data.actions;
+      setMessages((m) => [...m, { id: replyId, role: "kin", text: data.reply!, actions }]);
       busy.current = false;
       if (settings.current.speakReplies) {
         setStatus("speaking");
@@ -151,6 +157,38 @@ export function Device({ people }: { people: { id: string; name: string; languag
       setStatus((s) => (s === "speaking" || s === "thinking" ? (vad.current ? "listening" : "idle") : s));
     }
   }
+
+  // Medication reminders: about once a minute, ask which doses are due and have
+  // Kin bring each one up in the person's language.
+  useEffect(() => {
+    if (!personId || selected === "__new") return;
+    const languageName = (code: string) => ({ en: "English", hi: "Hindi", bn: "Bengali" })[code];
+    async function poll() {
+      if (busy.current || document.hidden) return;
+      try {
+        const res = await fetch(`/api/reminders?personId=${encodeURIComponent(personId)}`);
+        if (!res.ok) return;
+        const { due } = (await res.json()) as { due: { medication: string; time: string }[] };
+        if (!due?.length || busy.current) return;
+        const meds = due.map((d) => d.medication).join(" and ");
+        const speakIn = languageName(settings.current.lang) ?? people.find((p) => p.id === personId)?.language ?? "their language";
+        await send(
+          `[Kin app] It's time for their ${due.map((d) => `${d.time} ${d.medication}`).join(" and ")}. ` +
+            `In ${speakIn}, remind them gently and ask whether they've taken it. Log their answer with ` +
+            `log_medication using the name ${due.map((d) => `"${d.medication}"`).join(" / ")}.`,
+          null,
+          { kind: "reminder", text: `Reminder: ${meds} (${due.map((d) => d.time).join(", ")})` },
+        );
+      } catch {
+        // offline for a moment; the next poll tries again
+      }
+    }
+    poll();
+    const timer = setInterval(poll, 60_000);
+    return () => clearInterval(timer);
+    // send reads everything it needs from refs, so it doesn't need to be a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personId, selected, people]);
 
   async function transcribeAndSend(audio: Blob) {
     busy.current = true; // claim the turn before transcribing, so a second utterance can't slip in

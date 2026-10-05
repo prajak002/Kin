@@ -17,6 +17,7 @@ dependencies = [
     "sounddevice>=0.5.6",
     "starlette>=1.7.0",
     "strands-agents[ollama,openai]>=1.57.2",
+    "tzdata>=2026.5",
     "uvicorn>=0.54.0",
 ]
 

@@ -56,6 +56,9 @@ def _action(name: str, args: dict[str, Any]) -> dict[str, str] | None:
             return {"kind": "reminiscence", "text": "Found films and songs from their younger years"}
         case "local_conditions":
             return {"kind": "weather", "text": "Checked today's weather and air"}
+        case "set_medication_schedule":
+            times = ", ".join(args.get("times") or []) or "no reminders"
+            return {"kind": "reminder", "text": f"Reminders for {args.get('medication', 'a medicine')}: {times}"}
         case "register_person":
             return {"kind": "profile", "text": "Updated their profile"}
     return None

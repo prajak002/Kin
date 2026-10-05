@@ -82,6 +82,9 @@ class DynamoStore:
     def add_dose(self, person_id: str, medication: str, taken: bool, at: str | None = None) -> dict[str, Any]:
         return self._append("doses", {"person_id": person_id, "medication": medication, "taken": taken, "at": at})
 
+    def add_row(self, table: str, person_id: str, **fields: Any) -> dict[str, Any]:
+        return self._append(table, {"person_id": person_id, **fields})
+
     def add_alert(self, person_id: str, level: str, reason: str, at: str | None = None) -> dict[str, Any]:
         return self._append("alerts", {"person_id": person_id, "level": level, "reason": reason, "at": at})
 
