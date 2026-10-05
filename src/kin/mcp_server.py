@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated, Literal
 
 import httpx
@@ -151,7 +151,7 @@ def set_medication_schedule(
         raise ToolError(str(e)) from e
     schedule = [e for e in person.get("schedule") or [] if not reminders.same_medication(e["medication"], medication)]
     if times:
-        schedule.append({"medication": medication.strip(), "times": times})
+        schedule.append({"medication": medication.strip(), "times": times, "since": datetime.now(timezone.utc).isoformat(timespec="seconds")})
     medications = person.get("medications") or []
     if times and not any(reminders.same_medication(m, medication) for m in medications):
         medications = [*medications, medication.strip()]

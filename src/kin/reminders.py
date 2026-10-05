@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 ESCALATE_AFTER = timedelta(minutes=45)
 REMIND_WITHIN = timedelta(hours=3)  # an 8 am dose isn't announced at 6 pm
-EARLY = timedelta(hours=2)  # a dose taken a little before its time still counts
+EARLY = timedelta(hours=1)  # a dose taken a little before its time still counts
 TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
@@ -46,18 +46,22 @@ def same_medication(a: str, b: str) -> bool:
 
 
 def slots_today(person: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
-    """Today's doses in time order. A dose logged between a slot's `at - EARLY`
-    and `until` (the same medicine's next slot, less EARLY, or midnight) counts for it."""
+    """Today's doses in time order. A dose logged between a slot's `from` (EARLY
+    before it, but not before the schedule was set) and `until` (the same
+    medicine's next slot, less EARLY, or midnight) counts for it."""
     local = now.astimezone(tz(person))
     midnight = (local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     slots = []
     for entry in person.get("schedule") or []:
         times = sorted(entry.get("times", []))
         ats = [local.replace(hour=int(t[:2]), minute=int(t[3:]), second=0, microsecond=0) for t in times]
+        # Doses logged before this schedule was set (say, for the old time) don't count.
+        since = datetime.fromisoformat(entry["since"]) if entry.get("since") else None
         for i, (t, at) in enumerate(zip(times, ats)):
             until = ats[i + 1] - EARLY if i + 1 < len(ats) else midnight
-            slots.append({"medication": entry["medication"], "time": t,
-                          "at": at.astimezone(timezone.utc), "until": until.astimezone(timezone.utc)})
+            start = at - EARLY if since is None else max(at - EARLY, since)
+            slots.append({"medication": entry["medication"], "time": t, "at": at.astimezone(timezone.utc),
+                          "from": start.astimezone(timezone.utc), "until": until.astimezone(timezone.utc)})
     return sorted(slots, key=lambda s: s["at"])
 
 
@@ -89,7 +93,7 @@ def check(person: dict[str, Any], store, now: datetime | None = None, raise_aler
     for slot in slots_today(person, now):
         key = slot["at"].isoformat(timespec="minutes")
         log = [d for d in doses if same_medication(d["medication"], slot["medication"])
-               and slot["at"] - EARLY <= datetime.fromisoformat(d["at"]) < slot["until"]]
+               and slot["from"] <= datetime.fromisoformat(d["at"]) < slot["until"]]
         status = ("taken" if any(d["taken"] for d in log) else "missed" if log
                   else "upcoming" if now < slot["at"] else "waiting")
         today.append({"medication": slot["medication"], "time": slot["time"], "status": status})
@@ -114,6 +118,6 @@ def scheduled_time(person: dict[str, Any], medication: str, now: datetime | None
     """The time of today's scheduled dose a just-logged medication belongs to, if any."""
     now = now or datetime.now(timezone.utc)
     for slot in slots_today(person, now):
-        if same_medication(slot["medication"], medication) and slot["at"] - EARLY <= now < slot["until"]:
+        if same_medication(slot["medication"], medication) and slot["from"] <= now < slot["until"]:
             return slot["time"]
     return None

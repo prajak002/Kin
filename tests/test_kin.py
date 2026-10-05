@@ -553,7 +553,8 @@ def test_medication_reminders(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "store", store)
     mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
     person = mcp_server.set_medication_schedule("asha", "Metformin", ["8:00", "20:00"])
-    assert person["schedule"] == [{"medication": "Metformin", "times": ["08:00", "20:00"]}]
+    assert [{k: e[k] for k in ("medication", "times")} for e in person["schedule"]] == [{"medication": "Metformin", "times": ["08:00", "20:00"]}]
+    person["schedule"][0]["since"] = "2026-10-04T00:00:00+00:00"  # set the day before the times below
     assert "Metformin" in person["medications"]
     with pytest.raises(ToolError, match="isn't a time"):
         mcp_server.set_medication_schedule("asha", "Metformin", ["8am"])
@@ -779,3 +780,19 @@ def test_taken_scheduled_dose_tells_family(tmp_path, monkeypatch):
     monkeypatch.setattr(reminders, "scheduled_time", lambda person, med, now=None: None)
     mcp_server.log_medication("asha", "vitamin D", True)  # not scheduled: no message
     assert len(told) == 1
+
+
+def test_dose_before_reschedule_doesnt_count(tmp_path):
+    from datetime import datetime, timezone
+
+    from kin import reminders
+
+    store = Store(tmp_path / "s.json")
+    ist = lambda h, m: datetime(2026, 10, 5, h, m, tzinfo=reminders.tz({})).astimezone(timezone.utc)  # noqa: E731
+    store.upsert_person("asha", name="Asha")
+    store.add_dose("asha", "debza", True, at=ist(20, 30).isoformat(timespec="seconds"))
+    # Moved from 20:30 to 20:46 at 20:45: the 20:30 dose is for the old time.
+    person = store.upsert_person("asha", schedule=[{"medication": "debza", "times": ["20:46"],
+                                                    "since": ist(20, 45).isoformat(timespec="seconds")}])
+    status = reminders.check(person, store, ist(20, 47), lambda *a: None, deliver=False)["today"][0]["status"]
+    assert status == "waiting"
