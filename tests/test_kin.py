@@ -565,14 +565,20 @@ def test_medication_reminders(tmp_path, monkeypatch):
     early = reminders.check(person, store, ist(7, 30), fake_alert)
     assert early["due"] == [] and [d["status"] for d in early["today"]] == ["upcoming", "upcoming"]
 
-    # 08:05: remind once; asking again doesn't repeat it.
+    # 08:02, the server's minute job: family get "time for…", but the spoken
+    # reminder is left for the device.
+    assert reminders.check(person, store, ist(8, 2), fake_alert, speak=False)["due"] == []
+    assert alerts == [("info", alerts[0][1])] and "08:00: time for Asha's Metformin" in alerts[0][1]
+
+    # 08:05: the device gets the reminder once; family aren't told twice.
     assert reminders.check(person, store, ist(8, 5), fake_alert)["due"] == [{"medication": "Metformin", "time": "08:00"}]
     assert reminders.check(person, store, ist(8, 6), fake_alert)["due"] == []
+    assert len(alerts) == 1
 
-    # 08:50, still not confirmed: family told once.
+    # 08:50, still not confirmed: a warning, once.
     assert reminders.check(person, store, ist(8, 50), fake_alert)["escalated"]
     reminders.check(person, store, ist(8, 55), fake_alert)
-    assert len(alerts) == 1 and "08:00 Metformin" in alerts[0][1]
+    assert [a[0] for a in alerts] == ["info", "warning"] and "08:00 Metformin" in alerts[1][1]
 
     # A dose logged in the person's words counts for the evening slot.
     store.add_dose("asha", "my metformin tablet", True, at=ist(20, 10).isoformat(timespec="seconds"))
@@ -756,3 +762,20 @@ async def test_speech_falls_back_to_google(monkeypatch):
     monkeypatch.setattr(speech, "_google", google)
     monkeypatch.setattr(speech.asyncio, "sleep", no_wait)
     assert await speech.synthesise("নমস্কার", "bn") == b"google:bn"
+
+
+def test_taken_scheduled_dose_tells_family(tmp_path, monkeypatch):
+    from kin import mcp_server, reminders
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    told = []
+    monkeypatch.setattr(mcp_server, "notify_family", lambda person, level, reason: told.append(reason) or [])
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+    mcp_server.set_medication_schedule("asha", "debza", ["20:30"])
+    monkeypatch.setattr(reminders, "scheduled_time", lambda person, med, now=None: "20:30")
+    mcp_server.log_medication("asha", "Debza tablet", True)
+    assert told == ["✅ Asha took the 20:30 Debza tablet."]
+
+    monkeypatch.setattr(reminders, "scheduled_time", lambda person, med, now=None: None)
+    mcp_server.log_medication("asha", "vitamin D", True)  # not scheduled: no message
+    assert len(told) == 1

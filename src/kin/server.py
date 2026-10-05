@@ -8,6 +8,7 @@
   /voice-notes/<id>  a family voice note, for the person's device
   /speech       a reply as MP3 in an Indian language: {"text", "lang"}
   /cron/daily   evening digest and missed check-in alerts (Vercel Cron)
+  /cron/reminders  medication reminders to family, run every few minutes
   /health       liveness
 
 Run locally with `uv run uvicorn kin.server:app --port 8000`.
@@ -127,6 +128,22 @@ async def telegram(request: Request) -> Response:
 
     await _telegram_reply(chat_id, await family_agent.answer("telegram", str(chat_id), sender, text))
     return JSONResponse({"ok": True})
+
+
+@server.custom_route("/cron/reminders", methods=["GET", "POST"])
+async def reminders_job(request: Request) -> Response:
+    """Every few minutes (an external scheduler, since Vercel's free cron runs daily):
+    WhatsApp family when a dose is due or unconfirmed, even with Kin's device closed."""
+    secret = os.environ.get("CRON_SECRET")
+    if not secret or request.headers.get("authorization") != f"Bearer {secret}":
+        return Response(status_code=401)
+    report = []
+    for person in await asyncio.to_thread(mcp_server.store.list_people):
+        if person.get("schedule"):
+            result = await asyncio.to_thread(reminders.check, person, mcp_server.store,
+                                             raise_alert=mcp_server.raise_alert, speak=False)
+            report.append({"person": person["id"], "escalated": len(result["escalated"])})
+    return JSONResponse({"ok": True, "people": report})
 
 
 @server.custom_route("/cron/daily", methods=["GET"])

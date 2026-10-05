@@ -61,14 +61,29 @@ def slots_today(person: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
     return sorted(slots, key=lambda s: s["at"])
 
 
-def check(person: dict[str, Any], store, now: datetime | None = None, raise_alert=None, deliver: bool = True) -> dict[str, Any]:
+def check(person: dict[str, Any], store, now: datetime | None = None, raise_alert=None,
+          deliver: bool = True, speak: bool = True) -> dict[str, Any]:
     """Today's doses with their status, the reminders due now, and any family
     alerts raised. raise_alert(person, level, reason) defaults to mcp_server's.
-    deliver=False only looks: nothing is recorded, nobody is alerted."""
+
+    deliver=False only looks: nothing is recorded, nobody is told. With deliver,
+    family get a WhatsApp at dose time and a warning if it isn't confirmed. speak
+    (Kin's device) also returns the reminders for Kin to say; the server's
+    minute job passes speak=False, so the device still says them when it next looks."""
     now = now or datetime.now(timezone.utc)
     pid = person["id"]
+    if raise_alert is None:
+        from .mcp_server import raise_alert
     doses = store.recent("doses", pid, 200)
     sent = {(r["medication"], r["slot"], r["stage"]) for r in store.recent("reminders", pid, 200)}
+
+    def once(slot: dict[str, Any], key: str, stage: str) -> bool:
+        """Record a step for this dose; False if it was already taken."""
+        if (slot["medication"], key, stage) in sent:
+            return False
+        store.add_row("reminders", pid, medication=slot["medication"], slot=key, stage=stage)
+        sent.add((slot["medication"], key, stage))
+        return True
 
     today, due, escalated = [], [], []
     for slot in slots_today(person, now):
@@ -78,21 +93,27 @@ def check(person: dict[str, Any], store, now: datetime | None = None, raise_aler
         status = ("taken" if any(d["taken"] for d in log) else "missed" if log
                   else "upcoming" if now < slot["at"] else "waiting")
         today.append({"medication": slot["medication"], "time": slot["time"], "status": status})
-        if status != "waiting":
+        if status != "waiting" or not deliver:
             continue
 
         late = now - slot["at"]
-        if not deliver:
-            continue
-        if (slot["medication"], key, "reminded") not in sent and late <= REMIND_WITHIN:
-            store.add_row("reminders", pid, medication=slot["medication"], slot=key, stage="reminded")
+        if late <= REMIND_WITHIN and once(slot, key, "family_told"):
+            raise_alert(person, "info", f"⏰ {slot['time']}: time for {person['name']}'s {slot['medication']}. "
+                                        "Kin is reminding them now and will tell you when it's taken.")
+        if speak and late <= REMIND_WITHIN and once(slot, key, "reminded"):
             due.append({"medication": slot["medication"], "time": slot["time"]})
-        if late >= ESCALATE_AFTER and (slot["medication"], key, "escalated") not in sent:
-            store.add_row("reminders", pid, medication=slot["medication"], slot=key, stage="escalated")
-            reason = f"{person['name']} hasn't confirmed the {slot['time']} {slot['medication']} yet. Maybe give them a call?"
-            if raise_alert is None:
-                from .mcp_server import raise_alert
-            raise_alert(person, "warning", reason)
+        if late >= ESCALATE_AFTER and once(slot, key, "escalated"):
+            raise_alert(person, "warning", f"{person['name']} hasn't confirmed the {slot['time']} {slot['medication']} "
+                                           "yet. Maybe give them a call?")
             escalated.append({"medication": slot["medication"], "time": slot["time"]})
 
     return {"today": today, "due": due, "escalated": escalated}
+
+
+def scheduled_time(person: dict[str, Any], medication: str, now: datetime | None = None) -> str | None:
+    """The time of today's scheduled dose a just-logged medication belongs to, if any."""
+    now = now or datetime.now(timezone.utc)
+    for slot in slots_today(person, now):
+        if same_medication(slot["medication"], medication) and slot["at"] - EARLY <= now < slot["until"]:
+            return slot["time"]
+    return None

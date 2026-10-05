@@ -130,6 +130,9 @@ def log_medication(person_id: str, medication: str, taken: bool) -> dict:
     alert = None
     if not taken:
         alert = raise_alert(person, "info", f"{person['name']} skipped {medication}.")
+    elif slot := reminders.scheduled_time(person, medication):
+        # A scheduled dose: family were told it was due, so tell them it's done.
+        alert = raise_alert(person, "info", f"✅ {person['name']} took the {slot} {medication}.")
     return {"dose": dose, "alert": alert}
 
 
