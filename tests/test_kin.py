@@ -717,3 +717,42 @@ def test_whatsapp_webhook_acknowledges_even_if_reply_fails(tmp_path, monkeypatch
     sig = "sha256=" + hmac_.new(b"app-secret", payload, hashlib.sha256).hexdigest()
     with TestClient(server.create_app()) as client:
         assert client.post("/whatsapp", content=payload, headers={"X-Hub-Signature-256": sig}).status_code == 200
+
+
+@pytest.mark.parametrize("auto,forced,expected", [
+    (("english", "Hi Ma"), None, "Hi Ma"),                     # English is trusted
+    (("hindi", "नो मुश्कर"), "নমস্কার মা", "নমস্কার মা"),          # Bengali misheard as Hindi
+    (("hindi", "नमस्ते, आज मेरी तबियत"), "", "नमस्ते, आज मेरी तबियत"),  # really Hindi: keep it
+])
+def test_family_note_language(monkeypatch, auto, forced, expected):
+    from kin import inbox
+
+    monkeypatch.setenv("KIN_OPENAI_API_KEY", "k")
+    calls = []
+
+    def fake_post(url, data, **_):
+        calls.append(data.get("language"))
+        body = {"language": auto[0], "text": auto[1]} if "language" not in data else {"text": forced}
+        return httpx.Response(200, json=body, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(inbox.httpx, "post", fake_post)
+    assert inbox.transcribe(b"ogg", "audio/ogg", "Bengali") == expected
+    assert calls == ([None] if forced is None else [None, "bn"])
+
+
+async def test_speech_falls_back_to_google(monkeypatch):
+    from kin import speech
+
+    async def refused(text, voice):
+        raise RuntimeError("no audio")
+
+    async def google(text, lang):
+        return f"google:{lang}".encode()
+
+    async def no_wait(_):
+        return None
+
+    monkeypatch.setattr(speech, "_edge", refused)
+    monkeypatch.setattr(speech, "_google", google)
+    monkeypatch.setattr(speech.asyncio, "sleep", no_wait)
+    assert await speech.synthesise("নমস্কার", "bn") == b"google:bn"

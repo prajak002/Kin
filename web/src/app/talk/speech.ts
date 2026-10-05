@@ -118,8 +118,9 @@ export async function speak(text: string, natural: boolean): Promise<"kokoro" | 
     }
   }
   if (lang === "other") return "none";
-  // Indian languages: Kin's own voice, so it doesn't depend on what the device has.
-  if (lang && (await serverVoice(text, lang))) return "kin";
+  // Indian languages: Kin's own voice only. Device voices proved unreliable for them
+  // (Chrome hands the text to an English voice that reads just "comma, question mark").
+  if (lang) return (await serverVoice(text, lang)) ? "kin" : "none";
   return (await deviceVoice(text, lang)) ? "device" : "none";
 }
 

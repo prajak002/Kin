@@ -37,20 +37,37 @@ def download_whatsapp_media(media_id: str) -> tuple[bytes, str]:
 
 
 def transcribe(audio: bytes, mime: str, language: str | None = None) -> str:
-    """Whisper on the same OpenAI-compatible host as the agent (Groq's free tier)."""
+    """Whisper on the same OpenAI-compatible host as the agent (Groq's free tier).
+    Family may speak English or Hindi to a Bengali-speaking parent, so the language
+    is detected rather than assumed."""
     base = os.environ.get("KIN_OPENAI_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
     ext = {"audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/aac": "aac", "audio/amr": "amr"}.get(mime, "ogg")
-    data = {"model": os.environ.get("KIN_STT_MODEL", "whisper-large-v3-turbo")}
-    if code := LANGUAGE_CODES.get((language or "").lower()):
-        data["language"] = code  # auto-detection often hears Bengali as Hindi
-    r = httpx.post(
-        f"{base}/audio/transcriptions",
-        headers={"Authorization": f"Bearer {os.environ['KIN_OPENAI_API_KEY']}"},
-        data=data,
-        files={"file": (f"note.{ext}", audio, mime)},
-        timeout=30,
-    )
-    return r.raise_for_status().json()["text"].strip()
+
+    def whisper(code: str | None) -> dict[str, Any]:
+        data = {"model": os.environ.get("KIN_STT_MODEL", "whisper-large-v3-turbo"), "response_format": "verbose_json"}
+        if code:
+            data["language"] = code
+        r = httpx.post(
+            f"{base}/audio/transcriptions",
+            headers={"Authorization": f"Bearer {os.environ['KIN_OPENAI_API_KEY']}"},
+            data=data,
+            files={"file": (f"note.{ext}", audio, mime)},
+            timeout=30,
+        )
+        return r.raise_for_status().json()
+
+    heard = whisper(None)
+    detected = (heard.get("language") or "").lower()
+    usual = LANGUAGE_CODES.get((language or "").lower())
+    # Whisper reliably hears Bengali as Hindi (and Hindi as Urdu), even from a clear
+    # voice. Family write in English or in the parent's language, so unless it heard
+    # English, transcribe in the parent's language.
+    if usual and detected != "english" and LANGUAGE_CODES.get(detected) != usual:
+        again = whisper(usual)
+        # Speech really in another language comes back empty or cut short: keep the first.
+        if len(again["text"].strip()) >= 0.6 * len(heard["text"].strip()):
+            heard = again
+    return heard["text"].strip()
 
 
 def leave_message(store, person: dict[str, Any], sender: dict[str, Any], text: str,
