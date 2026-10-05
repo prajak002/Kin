@@ -43,6 +43,7 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
   const recorder = useRef<MediaRecorder | null>(null);
   const vad = useRef<{ destroy(): void } | null>(null);
   const busy = useRef(false);
+  const starting = useRef(false);
   const sessions = useRef<Record<string, string>>({});
   const bottom = useRef<HTMLDivElement>(null);
   const personId = selected === "__new" ? slug(newName) : selected;
@@ -67,8 +68,12 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
 
   async function send(text: string, language?: string | null) {
     const id = personRef.current;
-    if (!text.trim()) return setStatus(vad.current ? "listening" : "idle");
+    if (!text.trim()) {
+      busy.current = false;
+      return setStatus(vad.current ? "listening" : "idle");
+    }
     if (!id) {
+      busy.current = false;
       setError("Type the new person's first name before talking.");
       return setStatus("idle");
     }
@@ -103,6 +108,7 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
   }
 
   async function transcribeAndSend(audio: Blob) {
+    busy.current = true; // claim the turn before transcribing, so a second utterance can't slip in
     setStatus("transcribing");
     try {
       const res = await fetch("/api/transcribe", { method: "POST", headers: { "content-type": audio.type }, body: audio });
@@ -110,19 +116,22 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
       if (!res.ok) throw new Error(data.error || "Couldn't hear that");
       await send(data.text ?? "", data.language);
     } catch (e) {
+      busy.current = false;
       setError(e instanceof Error ? e.message : String(e));
       setStatus(vad.current ? "listening" : "idle");
     }
   }
 
   async function toggleHandsFree(on: boolean) {
+    if (starting.current) return; // a second click while loading would start a second detector
     setError(null);
+    vad.current?.destroy();
+    vad.current = null;
     if (!on) {
-      vad.current?.destroy();
-      vad.current = null;
       setHandsFree(false);
       return setStatus("idle");
     }
+    starting.current = true;
     setLoading("Loading the open-source voice detector (Silero VAD)…");
     try {
       vad.current = await startHandsFree({
@@ -136,6 +145,7 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't start hands-free mode. Allow the microphone and try again.");
     } finally {
+      starting.current = false;
       setLoading(null);
     }
   }
@@ -223,7 +233,7 @@ export function Device({ people }: { people: { id: string; name: string }[] }) {
 
         <div className="w-full space-y-2.5 border-t border-line pt-4 text-sm text-ink-2">
           <label className="flex items-start gap-2">
-            <input type="checkbox" className="mt-1" checked={handsFree} onChange={(e) => toggleHandsFree(e.target.checked)} />
+            <input type="checkbox" className="mt-1" checked={handsFree} disabled={loading !== null} onChange={(e) => toggleHandsFree(e.target.checked)} />
             <span>
               Hands-free
               <span className="block text-xs text-ink-3">Silero VAD (open source) hears when you start and stop.</span>
