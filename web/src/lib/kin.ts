@@ -109,6 +109,20 @@ export async function voiceNote(id: string): Promise<Response> {
   }
 }
 
+/** A reply spoken in an Indian language, as MP3 from the backend. */
+export async function speechAudio(text: string, lang: string): Promise<Response> {
+  const url = new URL("/speech", MCP_URL).toString();
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ text, lang }),
+    });
+  } catch (e) {
+    throw new KinOffline(`Kin's backend is not reachable at ${url}`, { cause: e });
+  }
+}
+
 export async function askKin(
   prompt: string,
   personId: string,

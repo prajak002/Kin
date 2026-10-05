@@ -86,10 +86,11 @@ async function deviceVoice(text: string, lang: string | null): Promise<boolean> 
   });
 }
 
-/** Speak a reply. Kokoro for English when chosen; the device's voice for Hindi,
- *  Bengali and other languages, or if the model can't load. Resolves when playback
+/** Speak a reply. Kokoro for English when chosen; Kin's own voice (edge-tts on the
+ *  server) for Hindi, Bengali and other Indian languages; the device's voice otherwise,
+ *  or if those fail. Resolves when playback
  *  ends; "none" when the device has no voice for the reply's language. */
-export async function speak(text: string, natural: boolean): Promise<"kokoro" | "device" | "none"> {
+export async function speak(text: string, natural: boolean): Promise<"kokoro" | "kin" | "device" | "none"> {
   stopSpeaking();
   const lang = scriptLang(text);
   if (natural && !lang) {
@@ -117,7 +118,27 @@ export async function speak(text: string, natural: boolean): Promise<"kokoro" | 
     }
   }
   if (lang === "other") return "none";
+  // Indian languages: Kin's own voice, so it doesn't depend on what the device has.
+  if (lang && (await serverVoice(text, lang))) return "kin";
   return (await deviceVoice(text, lang)) ? "device" : "none";
+}
+
+/** Fetch the reply as audio from Kin and play it. False if the voice service failed. */
+async function serverVoice(text: string, lang: string): Promise<boolean> {
+  try {
+    const res = await fetch("/api/speak", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, lang }),
+    });
+    if (!res.ok) return false;
+    const url = URL.createObjectURL(await res.blob());
+    await playClip(url);
+    URL.revokeObjectURL(url);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Play a recording (a family voice note). Talking interrupts it, like Kin's voice. */

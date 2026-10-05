@@ -79,7 +79,7 @@ function describe(trace: Trace | undefined, voice: string): string {
   const stepped = trace.guardrails?.filter((g) => g.action !== "model_already_alerted") ?? [];
   if (stepped.length) parts.push(`guardrail: ${stepped.map((g) => g.rule.replace("_", " ")).join(", ")}`);
   if (voice === "none") parts.push("not read aloud: no voice for this language on this device");
-  else if (voice !== "off") parts.push(voice === "kokoro" ? "Kokoro voice" : "device voice");
+  else if (voice !== "off") parts.push({ kokoro: "Kokoro voice", kin: "Kin voice (edge-tts)" }[voice] ?? "device voice");
   return parts.join(" · ");
 }
 

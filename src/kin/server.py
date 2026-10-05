@@ -6,6 +6,7 @@
   /telegram     Telegram bot webhook: family link up and ask questions
   /whatsapp     WhatsApp Cloud API webhook: family ask questions and send voice notes
   /voice-notes/<id>  a family voice note, for the person's device
+  /speech       a reply as MP3 in an Indian language: {"text", "lang"}
   /cron/daily   evening digest and missed check-in alerts (Vercel Cron)
   /health       liveness
 
@@ -29,7 +30,7 @@ from strands import Agent
 from . import family_agent, guardrails, mcp_server
 from .agent import build_agent, inprocess_tools
 from . import conditions
-from . import inbox, reminders
+from . import inbox, reminders, speech
 from .format import status_text
 from .notify import notify_family, send_whatsapp_text
 from .turns import run_turn
@@ -219,11 +220,25 @@ async def voice_note(request: Request) -> Response:
     return Response(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"})
 
 
+@server.custom_route("/speech", methods=["POST"])
+async def speak(request: Request) -> Response:
+    payload = await request.json()
+    text, lang = (payload.get("text") or "").strip(), payload.get("lang") or ""
+    if not text or lang not in speech.VOICES:
+        return JSONResponse({"error": f"needs text and a lang from {sorted(speech.VOICES)}"}, status_code=400)
+    try:
+        audio = await speech.synthesise(text, lang)
+    except Exception as e:
+        log.exception("speech failed")
+        return JSONResponse({"error": f"voice unavailable ({type(e).__name__})"}, status_code=502)
+    return Response(audio, media_type="audio/mpeg")
+
+
 class RequireToken:
     """When KIN_API_TOKEN is set, /mcp and /invocations need `Authorization: Bearer <token>`
     (or `?key=<token>` for MCP clients that can't set headers)."""
 
-    PROTECTED = ("/mcp", "/invocations", "/traces")
+    PROTECTED = ("/mcp", "/invocations", "/traces", "/speech")
 
     def __init__(self, app):
         self.app = app

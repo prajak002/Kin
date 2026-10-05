@@ -675,3 +675,23 @@ async def test_look_up_returns_matching_passages():
     [hit] = await facts.look_up("national animal of India", transport=httpx.MockTransport(handler))
     assert hit["passage"] == "Tigers are the national animal there"
     assert hit["intro"].startswith("Tigers in India")
+
+
+def test_speech_route(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+
+    from kin import mcp_server, server
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    monkeypatch.setenv("KIN_API_TOKEN", "tok")
+
+    async def fake_synthesise(text, lang):
+        return f"MP3:{lang}:{text}".encode()
+
+    monkeypatch.setattr(server.speech, "synthesise", fake_synthesise)
+    auth = {"Authorization": "Bearer tok"}
+    with TestClient(server.create_app()) as client:
+        assert client.post("/speech", json={"text": "নমস্কার", "lang": "bn"}).status_code == 401
+        ok = client.post("/speech", json={"text": "নমস্কার", "lang": "bn"}, headers=auth)
+        assert ok.headers["content-type"] == "audio/mpeg" and ok.content == "MP3:bn:নমস্কার".encode()
+        assert client.post("/speech", json={"text": "hi", "lang": "xx"}, headers=auth).status_code == 400
