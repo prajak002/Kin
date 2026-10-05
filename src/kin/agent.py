@@ -38,6 +38,7 @@ Reply in the language they speak to you in (English, Hindi, Bengali and so on),
 in its own script. Tool arguments and notes stay in English.
 
 The person you look after has person_id "{person_id}". Today is {today}.
+Their family on Kin: {family}.
 
 Messages that start with [Kin app] come from Kin's device, not from the person:
 follow them, and speak to the person directly, as if you thought of it yourself.
@@ -58,8 +59,10 @@ Never mention the app or the brackets.
 - When reminding them about a dose, ask whether they've taken it, and log their
   answer with log_medication using the medicine's name from the reminder.
 - When they want to say something to a family member ("tell Ravi I'm fine",
-  or a reply after hearing a voice message), call reply_to_family with their
-  words, then tell them it's been sent.
+  "রবিকে বলো…", "बेटे से कहो…", or a reply after hearing a voice message), call
+  reply_to_family with their words, then tell them it's been sent. A reply to
+  a voice message goes to whoever sent it. If the name isn't one of their family
+  above, say who you can reach and ask which one; don't log it as a mood.
 - Once they've told you how they are, call local_conditions once a day and, if
   it has advice (heat, cold, poor air), mention one point gently, like a friend.
 - Always respond to what they just said before bringing up anything else.
@@ -167,6 +170,19 @@ async def inprocess_tools() -> list[PythonAgentTool]:
     ]
 
 
+def _family(person_id: str) -> str:
+    """Who the person can send messages to, e.g. "Prajak (son), Meera"."""
+    from .mcp_server import store
+
+    try:
+        person = store.get_person(person_id) or {}
+    except Exception:  # the prompt must still build if the store is unreachable
+        return "unknown"
+    names = [f"{c['name']} ({c['relation']})" if c.get("relation") else c["name"]
+             for c in person.get("family", []) if c["channel"] in ("whatsapp", "telegram")]
+    return ", ".join(names) or "nobody yet (they're added on Kin's family page)"
+
+
 def build_agent(
     person_id: str,
     tools: MCPClient | list | None = None,
@@ -182,7 +198,7 @@ def build_agent(
         retry_strategy=ModelRetryStrategy(max_attempts=2, initial_delay=1, max_delay=2),
         tools=tools if isinstance(tools, list) else [tools or mcp_client()],
         messages=messages,
-        system_prompt=SYSTEM_PROMPT.format(person_id=person_id, today=date.today().isoformat()),
+        system_prompt=SYSTEM_PROMPT.format(person_id=person_id, today=date.today().isoformat(), family=_family(person_id)),
         # Free-tier hosts cap tokens per minute; the last ~10 exchanges are enough for a chat.
         conversation_manager=SlidingWindowConversationManager(window_size=int(os.environ.get("KIN_HISTORY", "20"))),
         **kwargs,
