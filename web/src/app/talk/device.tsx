@@ -17,6 +17,7 @@ const ACTION_COLOR: Record<string, string> = {
   memory: "var(--good)",
   reminiscence: "var(--good)",
   message: "var(--good)",
+  greeting: "var(--mood)",
   weather: "var(--warning)",
 };
 
@@ -157,6 +158,32 @@ export function Device({ people }: { people: { id: string; name: string; languag
       setStatus((s) => (s === "speaking" || s === "thinking" ? (vad.current ? "listening" : "idle") : s));
     }
   }
+
+  // Kin starts the day: the first time the device is opened each day for a
+  // person, Kin speaks first instead of waiting to be spoken to.
+  useEffect(() => {
+    if (!personId || selected === "__new") return;
+    const key = `kin-greeted:${personId}:${new Date().toDateString()}`;
+    try {
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, "1");
+    } catch {
+      return; // no storage (private window): don't greet on every visit
+    }
+    const hour = new Date().getHours();
+    const partOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+    const languageName = ({ en: "English", hi: "Hindi", bn: "Bengali" } as Record<string, string>)[settings.current.lang];
+    const speakIn = languageName ?? people.find((p) => p.id === personId)?.language ?? "their language";
+    send(
+      `[Kin app] Start today's conversation. Greet them warmly for the ${partOfDay} in ${speakIn}. Call ` +
+        "local_conditions and medication_reminders first; then, in at most three short spoken sentences, mention " +
+        "one weather tip if there is one, name each medicine still to come today (status upcoming or waiting) " +
+        "with its time said naturally (\"at 9 tonight\"), and ask how they're feeling.",
+      null,
+      { kind: "greeting", text: `Kin started the ${partOfDay} conversation` },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personId, selected]);
 
   // Medication reminders: about once a minute, ask which doses are due and have
   // Kin bring each one up in the person's language.
