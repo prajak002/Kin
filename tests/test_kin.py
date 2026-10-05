@@ -695,3 +695,25 @@ def test_speech_route(tmp_path, monkeypatch):
         ok = client.post("/speech", json={"text": "নমস্কার", "lang": "bn"}, headers=auth)
         assert ok.headers["content-type"] == "audio/mpeg" and ok.content == "MP3:bn:নমস্কার".encode()
         assert client.post("/speech", json={"text": "hi", "lang": "xx"}, headers=auth).status_code == 400
+
+
+def test_whatsapp_webhook_acknowledges_even_if_reply_fails(tmp_path, monkeypatch):
+    import hashlib
+    import hmac as hmac_
+
+    from starlette.testclient import TestClient
+
+    from kin import mcp_server, server
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    monkeypatch.setenv("KIN_WHATSAPP_APP_SECRET", "app-secret")
+
+    def expired(to, text):
+        raise httpx.HTTPStatusError("401", request=httpx.Request("POST", "https://graph.facebook.com"), response=httpx.Response(401))
+
+    monkeypatch.setattr(server, "send_whatsapp_text", expired)
+    payload = json.dumps({"entry": [{"changes": [{"value": {"messages": [
+        {"from": "15550009999", "type": "text", "text": {"body": "hi"}}]}}]}]}).encode()
+    sig = "sha256=" + hmac_.new(b"app-secret", payload, hashlib.sha256).hexdigest()
+    with TestClient(server.create_app()) as client:
+        assert client.post("/whatsapp", content=payload, headers={"X-Hub-Signature-256": sig}).status_code == 200

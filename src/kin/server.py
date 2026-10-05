@@ -185,7 +185,12 @@ async def whatsapp(request: Request) -> Response:
                     reply = await family_agent.answer("whatsapp", sender, names.get(sender, ""), msg["text"]["body"])
                 else:
                     continue
-                await asyncio.to_thread(send_whatsapp_text, sender, reply)
+                try:
+                    await asyncio.to_thread(send_whatsapp_text, sender, reply)
+                except Exception:
+                    # Still answer 200: Meta re-sends a message whose webhook fails,
+                    # and the voice note would land in the inbox several times.
+                    log.exception("WhatsApp reply failed")
     return JSONResponse({"ok": True})
 
 
