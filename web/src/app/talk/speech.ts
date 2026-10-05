@@ -36,30 +36,60 @@ export function stopSpeaking() {
   if ("speechSynthesis" in window) speechSynthesis.cancel();
 }
 
+// The language a reply is written in, from its script. "other" is a script with
+// no voice mapping here; null is Latin (English, or romanised Hindi).
+const SCRIPTS: [RegExp, string][] = [
+  [/[\u0900-\u097F]/, "hi"],
+  [/[\u0980-\u09FF]/, "bn"],
+  [/[\u0600-\u06FF]/, "ur"],
+  [/[\u0A00-\u0A7F]/, "pa"],
+  [/[\u0A80-\u0AFF]/, "gu"],
+  [/[\u0B00-\u0B7F]/, "or"],
+  [/[\u0B80-\u0BFF]/, "ta"],
+  [/[\u0C00-\u0C7F]/, "te"],
+  [/[\u0C80-\u0CFF]/, "kn"],
+  [/[\u0D00-\u0D7F]/, "ml"],
+];
+
 function scriptLang(text: string): string | null {
-  if (/[ऀ-ॿ]/.test(text)) return "hi";
-  if (/[ঀ-৿]/.test(text)) return "bn";
-  return null;
+  for (const [script, lang] of SCRIPTS) if (script.test(text)) return lang;
+  // Any other non-Latin letter: an English voice would read only the punctuation ("question mark").
+  return /[^\p{Script=Latin}\P{L}]/u.test(text) ? "other" : null;
 }
 
-function deviceVoice(text: string, lang: string | null): Promise<void> {
+// Chrome fills the voice list after the page loads; asking too early gets none.
+function loadVoices(): Promise<SpeechSynthesisVoice[]> {
+  const now = speechSynthesis.getVoices();
+  if (now.length) return Promise.resolve(now);
+  return new Promise((resolve) => {
+    const done = () => resolve(speechSynthesis.getVoices());
+    speechSynthesis.addEventListener("voiceschanged", done, { once: true });
+    setTimeout(done, 1500);
+  });
+}
+
+/** Speak with the device's voice for the reply's language. Returns false, without
+ *  speaking, if the device has no voice for it. */
+async function deviceVoice(text: string, lang: string | null): Promise<boolean> {
+  const voices = await loadVoices();
+  const want = lang ? [`${lang}-IN`, lang] : ["en-IN", "en-GB", "en"];
+  const voice = want.map((w) => voices.find((v) => v.lang.replace("_", "-").startsWith(w))).find(Boolean);
+  if (lang && !voice) return false;
   return new Promise((resolve) => {
     const u = new SpeechSynthesisUtterance(text);
-    const voices = speechSynthesis.getVoices();
-    const want = lang ? [`${lang}-IN`, lang] : ["en-IN", "en-GB", "en"];
-    const voice = want.map((w) => voices.find((v) => v.lang.startsWith(w))).find(Boolean);
     if (voice) u.voice = voice;
-    if (lang) u.lang = `${lang}-IN`;
+    u.lang = voice?.lang ?? "en-IN";
     u.rate = 0.95;
-    u.onend = u.onerror = () => resolve();
+    u.onend = u.onerror = () => resolve(true);
     playing = { stop: () => speechSynthesis.cancel() };
     speechSynthesis.speak(u);
   });
 }
 
 /** Speak a reply. Kokoro for English when chosen; the device's voice for Hindi,
- *  Bengali, or if the model can't load. Resolves when playback ends. */
-export async function speak(text: string, natural: boolean): Promise<"kokoro" | "device"> {
+ *  Bengali and other languages, or if the model can't load. Resolves when playback
+ *  ends; "none" when the device has no voice for the reply's language. */
+export async function speak(text: string, natural: boolean): Promise<"kokoro" | "device" | "none"> {
   stopSpeaking();
   const lang = scriptLang(text);
   if (natural && !lang) {
@@ -86,8 +116,8 @@ export async function speak(text: string, natural: boolean): Promise<"kokoro" | 
       // fall through to the device voice
     }
   }
-  await deviceVoice(text, lang);
-  return "device";
+  if (lang === "other") return "none";
+  return (await deviceVoice(text, lang)) ? "device" : "none";
 }
 
 /** Play a recording (a family voice note). Talking interrupts it, like Kin's voice. */

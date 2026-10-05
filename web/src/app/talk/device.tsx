@@ -77,7 +77,8 @@ function describe(trace: Trace | undefined, voice: string): string {
   if (trace.tools?.length) parts.push(trace.tools.map((t) => t.name).join(", "));
   const stepped = trace.guardrails?.filter((g) => g.action !== "model_already_alerted") ?? [];
   if (stepped.length) parts.push(`guardrail: ${stepped.map((g) => g.rule.replace("_", " ")).join(", ")}`);
-  parts.push(voice === "kokoro" ? "Kokoro voice" : "device voice");
+  if (voice === "none") parts.push("not read aloud: no voice for this language on this device");
+  else if (voice !== "off") parts.push(voice === "kokoro" ? "Kokoro voice" : "device voice");
   return parts.join(" · ");
 }
 
@@ -157,7 +158,7 @@ export function Device({ people }: { people: { id: string; name: string; languag
         const voice = await speak(data.reply, settings.current.natural);
         setMessages((m) => m.map((msg) => (msg.id === replyId ? { ...msg, meta: describe(data.trace, voice) } : msg)));
       } else {
-        setMessages((m) => m.map((msg) => (msg.id === replyId ? { ...msg, meta: describe(data.trace, "none") } : msg)));
+        setMessages((m) => m.map((msg) => (msg.id === replyId ? { ...msg, meta: describe(data.trace, "off") } : msg)));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -263,7 +264,9 @@ export function Device({ people }: { people: { id: string; name: string; languag
     setStatus("transcribing");
     try {
       const { lang } = settings.current;
-      const res = await fetch(`/api/transcribe${lang ? `?language=${lang}` : ""}`, { method: "POST", headers: { "content-type": audio.type }, body: audio });
+      const usual = languageCode(people.find((p) => p.id === personRef.current)?.language);
+      const query = lang ? `?language=${lang}` : usual ? `?expect=${usual}` : "";
+      const res = await fetch(`/api/transcribe${query}`, { method: "POST", headers: { "content-type": audio.type }, body: audio });
       const data = (await res.json()) as { text?: string; language?: string | null; error?: string };
       if (!res.ok) throw new Error(data.error || "Couldn't hear that");
       await send(data.text ?? "", data.language);
