@@ -49,6 +49,12 @@
       }
     },
     {
+      "source": "/cron/reminders",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
       "source": "/(.*)",
       "destination": {
         "service": "web"
