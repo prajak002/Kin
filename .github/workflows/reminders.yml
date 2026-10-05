@@ -1,0 +1,21 @@
+# Kin's medication reminders: every 5 minutes, ask the backend to WhatsApp family
+# about doses that are due or unconfirmed. Vercel's free cron only runs daily.
+name: Medication reminders
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Run reminders
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error --max-time 90 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            https://kin-nu-tan.vercel.app/cron/reminders
