@@ -11,6 +11,7 @@ running after the response can be cut off.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -20,6 +21,7 @@ CHANNELS = ("whatsapp", "telegram", "ntfy")
 PRIORITY = {"info": "3", "warning": "4", "urgent": "5"}
 TAGS = {"info": "information_source", "warning": "warning", "urgent": "rotating_light"}
 TIMEOUT = 8
+log = logging.getLogger("kin.notify")
 
 
 def _title(person_name: str, level: str) -> str:
@@ -117,5 +119,7 @@ def notify_family(person: dict[str, Any], level: str, reason: str) -> list[dict[
             results.append({"channel": channel, "to": name, "ok": True})
         except (httpx.HTTPError, KeyError) as e:
             # KeyError: the channel's credentials aren't configured.
-            results.append({"channel": channel, "to": name, "ok": False, "error": str(e)[:200]})
+            detail = e.response.text[:300] if isinstance(e, httpx.HTTPStatusError) else str(e)[:200]
+            log.warning("alert to %s over %s failed: %s", name, channel, detail)
+            results.append({"channel": channel, "to": name, "ok": False, "error": detail})
     return results
