@@ -92,6 +92,23 @@ export const setSchedule = (personId: string, medication: string, times: string[
 export const medicationReminders = (personId: string, deliver = false) =>
   callTool<Reminders>("medication_reminders", { person_id: personId, deliver });
 
+export type FamilyMessage = { id: string; sender: string; relation: string; text: string; audio: string | null; at: string };
+
+/** Messages and voice notes from family; with deliver, each is returned once. */
+export const familyMessages = (personId: string, deliver = false) =>
+  callTool<FamilyMessage[]>("family_messages", { person_id: personId, deliver });
+
+/** A family voice note's audio, from the backend. */
+export async function voiceNote(id: string): Promise<Response> {
+  // Same host as the MCP server, wherever that runs.
+  const url = new URL(`/voice-notes/${encodeURIComponent(id)}`, MCP_URL).toString();
+  try {
+    return await fetch(url, { headers: authHeaders(), cache: "no-store" });
+  } catch (e) {
+    throw new KinOffline(`Kin's backend is not reachable at ${url}`, { cause: e });
+  }
+}
+
 export async function askKin(
   prompt: string,
   personId: string,

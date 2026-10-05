@@ -2,10 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { speak, startHandsFree, stopSpeaking } from "./speech";
+import { playClip, speak, startHandsFree, stopSpeaking } from "./speech";
 
 type Action = { kind: string; text: string };
-type Message = { id: string; role: "you" | "kin"; text: string; meta?: string; actions?: Action[] };
+type Message = {
+  id: string;
+  role: "you" | "kin" | "family";
+  text: string;
+  meta?: string;
+  actions?: Action[];
+  audio?: string; // a family voice note
+};
+type FamilyMessage = { id: string; sender: string; relation: string; text: string; audio: string | null };
 
 // A coloured dot per kind of action, from the theme's palette.
 const ACTION_COLOR: Record<string, string> = {
@@ -185,6 +193,38 @@ export function Device({ people }: { people: { id: string; name: string; languag
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [personId, selected]);
 
+  /** Play new voice notes and messages from family, then let Kin respond.
+   *  Returns whether there was anything. */
+  async function deliverFamilyMessages(): Promise<boolean> {
+    const id = personRef.current;
+    const res = await fetch(`/api/inbox?personId=${encodeURIComponent(id)}`).catch(() => null);
+    if (!res?.ok) return false;
+    const notes = (await res.json()) as FamilyMessage[];
+    if (!notes.length || busy.current) return false;
+    const languageName = ({ en: "English", hi: "Hindi", bn: "Bengali" } as Record<string, string>)[settings.current.lang];
+    const speakIn = languageName ?? people.find((p) => p.id === id)?.language ?? "their language";
+    for (const n of notes) {
+      const who = n.relation ? `${n.sender} (${n.relation})` : n.sender;
+      const audio = n.audio ? `/api/voice-notes/${n.audio}` : undefined;
+      setMessages((m) => [...m, { id: n.id, role: "family", text: n.text, meta: `From ${who}`, audio }]);
+      if (audio) {
+        setStatus("speaking");
+        await playClip(audio);
+      }
+      await send(
+        audio
+          ? `[Kin app] ${who} just sent them a voice message, which has been played to them. It said: "${n.text}". ` +
+              `In ${speakIn}, say in one short sentence what ${n.sender} said, in the third person ("${n.sender} says ` +
+              `he's coming…"), add a warm word, and ask if they'd like to send ${n.sender} a reply.`
+          : `[Kin app] ${who} sent them a message: "${n.text}". In ${speakIn}, tell them what ${n.sender} said, in ` +
+              `the third person ("${n.sender} says…"), then ask if they'd like to send ${n.sender} a reply.`,
+        null,
+        { kind: "message", text: `${audio ? "Voice note" : "Message"} from ${who}` },
+      );
+    }
+    return true;
+  }
+
   // Medication reminders: about once a minute, ask which doses are due and have
   // Kin bring each one up in the person's language.
   useEffect(() => {
@@ -192,6 +232,7 @@ export function Device({ people }: { people: { id: string; name: string; languag
     const languageName = (code: string) => ({ en: "English", hi: "Hindi", bn: "Bengali" })[code];
     async function poll() {
       if (busy.current || document.hidden) return;
+      if (await deliverFamilyMessages()) return;
       try {
         const res = await fetch(`/api/reminders?personId=${encodeURIComponent(personId)}`);
         if (!res.ok) return;
@@ -398,19 +439,31 @@ export function Device({ people }: { people: { id: string; name: string; languag
               Bengali.
             </p>
           )}
-          {messages.map((m) => (
-            <div key={m.id} className={`flex flex-col ${m.role === "you" ? "items-end" : "items-start"}`}>
-              <p
-                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed ${
-                  m.role === "you" ? "bg-accent-soft" : "border border-line bg-surface"
-                }`}
-              >
-                {m.text}
-              </p>
-              {m.actions && m.actions.length > 0 && <ActionCards actions={m.actions} />}
-              {m.meta && <span className="mt-1 px-1 text-[11px] text-ink-3">{m.meta}</span>}
-            </div>
-          ))}
+          {messages.map((m) =>
+            m.role === "family" ? (
+              <div key={m.id} className="flex flex-col items-start">
+                <div className="max-w-[85%] rounded-2xl border-2 border-mood/40 bg-surface px-4 py-3">
+                  <p className="text-xs font-medium text-ink-2">
+                    {m.audio ? "🎙️ Voice note" : "💬 Message"} · {m.meta}
+                  </p>
+                  {m.text && <p className="mt-1 text-[15px] leading-relaxed">{m.text}</p>}
+                  {m.audio && <audio controls src={m.audio} className="mt-2 h-9 w-64 max-w-full" />}
+                </div>
+              </div>
+            ) : (
+              <div key={m.id} className={`flex flex-col ${m.role === "you" ? "items-end" : "items-start"}`}>
+                <p
+                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed ${
+                    m.role === "you" ? "bg-accent-soft" : "border border-line bg-surface"
+                  }`}
+                >
+                  {m.text}
+                </p>
+                {m.actions && m.actions.length > 0 && <ActionCards actions={m.actions} />}
+                {m.meta && <span className="mt-1 px-1 text-[11px] text-ink-3">{m.meta}</span>}
+              </div>
+            ),
+          )}
           {thinking && <p className="text-sm text-ink-3">{STATUS_TEXT[status]}</p>}
           <div ref={bottom} />
         </div>

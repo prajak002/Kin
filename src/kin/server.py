@@ -4,7 +4,8 @@
   /invocations  the agent, AgentCore-compatible: {"prompt", "person_id"}
   /traces       recent turn traces (latency, tools, guardrails) for the dashboard
   /telegram     Telegram bot webhook: family link up and ask questions
-  /whatsapp     WhatsApp Cloud API webhook: family ask questions
+  /whatsapp     WhatsApp Cloud API webhook: family ask questions and send voice notes
+  /voice-notes/<id>  a family voice note, for the person's device
   /cron/daily   evening digest and missed check-in alerts (Vercel Cron)
   /health       liveness
 
@@ -28,7 +29,7 @@ from strands import Agent
 from . import family_agent, guardrails, mcp_server
 from .agent import build_agent, inprocess_tools
 from . import conditions
-from . import reminders
+from . import inbox, reminders
 from .format import status_text
 from .notify import notify_family, send_whatsapp_text
 from .turns import run_turn
@@ -176,12 +177,46 @@ async def whatsapp(request: Request) -> Response:
             value = change.get("value", {})
             names = {c["wa_id"]: c.get("profile", {}).get("name", "") for c in value.get("contacts", [])}
             for msg in value.get("messages", []):
-                if msg.get("type") != "text":
-                    continue
                 sender = msg["from"]
-                reply = await family_agent.answer("whatsapp", sender, names.get(sender, ""), msg["text"]["body"])
+                if msg.get("type") == "audio":
+                    reply = await asyncio.to_thread(_voice_note, sender, msg["audio"]["id"])
+                elif msg.get("type") == "text":
+                    reply = await family_agent.answer("whatsapp", sender, names.get(sender, ""), msg["text"]["body"])
+                else:
+                    continue
                 await asyncio.to_thread(send_whatsapp_text, sender, reply)
     return JSONResponse({"ok": True})
+
+
+def _voice_note(sender: str, media_id: str) -> str:
+    """A family voice note: download, transcribe, and leave it in each linked person's inbox."""
+    store = mcp_server.store
+    people = family_agent.contacts_for(store, "whatsapp", sender)
+    if not people:
+        return "This chat isn't connected to anyone yet. Ask your family to add you on Kin's family page."
+    try:
+        audio, mime = inbox.download_whatsapp_media(media_id)
+    except Exception:
+        log.exception("voice note download failed")
+        return "Sorry, I couldn't fetch that voice note. Could you send it again?"
+    for person in people:
+        try:
+            text = inbox.transcribe(audio, mime, person.get("language"))
+        except Exception:
+            log.exception("voice note transcription failed")
+            text = ""
+        inbox.leave_message(store, person, family_agent.sender_contact(person, "whatsapp", sender), text, audio, mime)
+    names = " and ".join(p["name"] for p in people)
+    return f"🎙️ Got it. Kin will play your voice note for {names} and send back anything they want to say."
+
+
+@server.custom_route("/voice-notes/{message_id}", methods=["GET"])
+async def voice_note(request: Request) -> Response:
+    blob = await asyncio.to_thread(mcp_server.store.get_blob, f"voice:{request.path_params['message_id']}")
+    if blob is None:
+        return Response(status_code=404)
+    data, mime = blob
+    return Response(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"})
 
 
 class RequireToken:
@@ -195,7 +230,8 @@ class RequireToken:
 
     async def __call__(self, scope, receive, send):
         token = os.environ.get("KIN_API_TOKEN")
-        if token and scope["type"] == "http" and scope["path"].rstrip("/") in self.PROTECTED:
+        path = scope.get("path", "").rstrip("/")
+        if token and scope["type"] == "http" and (path in self.PROTECTED or path.startswith("/voice-notes/")):
             request = Request(scope)
             supplied = request.headers.get("authorization", "").removeprefix("Bearer ").strip() or request.query_params.get("key")
             if not supplied or not hmac.compare_digest(supplied, token):

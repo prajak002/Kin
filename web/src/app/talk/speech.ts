@@ -90,6 +90,17 @@ export async function speak(text: string, natural: boolean): Promise<"kokoro" | 
   return "device";
 }
 
+/** Play a recording (a family voice note). Talking interrupts it, like Kin's voice. */
+export function playClip(url: string): Promise<void> {
+  stopSpeaking();
+  return new Promise((resolve) => {
+    const audio = new Audio(url);
+    audio.onended = audio.onerror = () => resolve();
+    playing = { stop: () => { audio.pause(); resolve(); } };
+    audio.play().catch(() => resolve()); // autoplay blocked: the card still has a play button
+  });
+}
+
 function loadScript(src: string): Promise<void> {
   if (document.querySelector(`script[src="${src}"]`)) return Promise.resolve();
   return new Promise((resolve, reject) => {

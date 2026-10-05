@@ -14,7 +14,7 @@ from typing import Any
 from strands import Agent, ModelRetryStrategy, tool
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 
-from . import mcp_server
+from . import inbox, mcp_server
 from .agent import build_model
 from .format import status_text
 from .turns import run_turn
@@ -31,8 +31,11 @@ This chat belongs to {sender}, who is family of: {people}.
 - Be warm and factual. If something looks worrying (low mood several days, missed
   doses, an urgent alert), say so plainly and suggest they call.
 - Never give medical advice, diagnoses or dosing instructions.
-- You can only read information. If they ask you to change something, explain
-  that it's done on Kin's family page.
+- If they want to say something to the person ("tell Mum I'll visit Sunday"),
+  call pass_message with their words; Kin's device reads it out to them. Tell
+  them it will be passed on. They can also send a voice note.
+- Otherwise you can only read information. If they ask you to change something,
+  explain that it's done on Kin's family page.
 - Only discuss the people listed above.
 """
 
@@ -48,7 +51,13 @@ def contacts_for(store, channel: str, address: str) -> list[dict[str, Any]]:
     ]
 
 
-def _scoped_tools(people: list[dict[str, Any]]) -> list:
+def sender_contact(person: dict[str, Any], channel: str, address: str) -> dict[str, Any]:
+    digits = lambda a: "".join(ch for ch in a if ch.isdigit())  # noqa: E731
+    same = (lambda c: digits(c["address"]) == digits(address)) if channel == "whatsapp" else (lambda c: c["address"] == address)
+    return next((c for c in person.get("family", []) if c["channel"] == channel and same(c)), {"name": "Family"})
+
+
+def _scoped_tools(people: list[dict[str, Any]], channel: str = "", address: str = "") -> list:
     allowed = {p["id"]: p for p in people}
 
     def check(person_id: str) -> None:
@@ -78,7 +87,20 @@ def _scoped_tools(people: list[dict[str, Any]]) -> list:
         p = allowed[person_id]
         return {k: p.get(k) for k in ("name", "birth_year", "hometown", "language", "medications", "favourites")}
 
-    return [wellbeing, profile]
+    @tool
+    def pass_message(person_id: str, message: str) -> dict:
+        """Leave a message for the person; Kin's device reads it out to them.
+
+        Args:
+            person_id: id of the person, one of the people this chat may ask about.
+            message: the family member's words, as they said them.
+        """
+        check(person_id)
+        person = allowed[person_id]
+        inbox.leave_message(mcp_server.store, person, sender_contact(person, channel, address), message.strip())
+        return {"passed_on_to": person["name"]}
+
+    return [wellbeing, profile, pass_message]
 
 
 async def answer(channel: str, address: str, sender: str, text: str) -> str:
@@ -91,7 +113,7 @@ async def answer(channel: str, address: str, sender: str, text: str) -> str:
     session = f"family:{channel}:{address}"
     agent = Agent(
         model=build_model(),
-        tools=_scoped_tools(people),
+        tools=_scoped_tools(people, channel, address),
         system_prompt=PROMPT.format(
             today=date.today().isoformat(),
             sender=sender or "a family member",

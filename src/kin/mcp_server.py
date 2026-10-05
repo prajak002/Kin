@@ -13,8 +13,8 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
-from . import conditions, memory, reminders
-from .notify import notify_family
+from . import conditions, inbox, memory, reminders
+from .notify import notify_family, send_family_text
 from .reminiscence import Person, build_set
 from .store import local_date, open_store
 
@@ -161,6 +161,36 @@ def medication_reminders(person_id: str, deliver: bool = False) -> dict:
     Kin's device passes deliver=true to also get the reminders due now (each is
     returned once) and to tell family about doses still unconfirmed."""
     return reminders.check(_require_person(person_id), store, raise_alert=raise_alert, deliver=deliver)
+
+
+@server.tool()
+def family_messages(person_id: str, deliver: bool = False) -> list[dict]:
+    """Voice notes and messages family sent the person that they haven't heard yet:
+    {id, sender, relation, text, audio, at}. Kin's device passes deliver=true when it
+    plays them, so each is delivered once."""
+    return inbox.collect(store, _require_person(person_id), deliver=deliver)
+
+
+@server.tool()
+def reply_to_family(
+    person_id: str,
+    to: Annotated[str, Field(description='who it is for, by name or relation ("Ravi", "my son")')],
+    message: Annotated[str, Field(description="what the person wants to say, in their own words")],
+) -> dict:
+    """Send the person's words to a family member on WhatsApp or Telegram, e.g.
+    after they hear a voice note and say "tell Ravi I'm fine"."""
+    person = _require_person(person_id)
+    contact = inbox.contact_named(person, to)
+    if contact is None:
+        names = ", ".join(c["name"] for c in person.get("family", [])) or "nobody yet"
+        raise ToolError(f"No family member called '{to}' can get messages. Family: {names}.")
+    try:
+        send_family_text(contact, f"💬 {person['name']} says: {message.strip()}")
+    except Exception as e:
+        log.exception("reply_to_family failed")
+        raise ToolError(f"Couldn't reach {contact['name']} right now ({type(e).__name__}).") from e
+    store.add_moment(person_id, "message", [f"to {contact['name']}"])
+    return {"sent_to": contact["name"], "channel": contact["channel"]}
 
 
 @server.tool()

@@ -87,6 +87,20 @@ def send_whatsapp_text(phone: str, text: str) -> None:
     ).raise_for_status()
 
 
+def send_family_text(contact: dict[str, Any], text: str) -> None:
+    """A plain message to one family contact (not an alert)."""
+    if contact["channel"] == "whatsapp":
+        send_whatsapp_text(contact["address"], text)
+    elif contact["channel"] == "telegram":
+        httpx.post(
+            f"https://api.telegram.org/bot{os.environ['KIN_TELEGRAM_BOT_TOKEN']}/sendMessage",
+            json={"chat_id": contact["address"], "text": text},
+            timeout=TIMEOUT,
+        ).raise_for_status()
+    else:
+        raise ValueError(f"Can't send messages over {contact['channel']}.")
+
+
 SENDERS = {"whatsapp": send_whatsapp, "telegram": send_telegram, "ntfy": send_ntfy}
 
 

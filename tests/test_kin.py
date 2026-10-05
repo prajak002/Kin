@@ -392,7 +392,7 @@ def test_family_agent_is_scoped_to_linked_people(tmp_path, monkeypatch):
     assert [p["id"] for p in people] == ["asha"]
     assert family_agent.contacts_for(mcp_server.store, "whatsapp", "910000000000") == []
 
-    wellbeing, profile = family_agent._scoped_tools(people)
+    wellbeing, profile, _ = family_agent._scoped_tools(people)
     assert wellbeing._tool_func("asha")["name"] == "Asha"
     with pytest.raises(ValueError, match="Not allowed"):
         wellbeing._tool_func("bina")
@@ -601,3 +601,62 @@ def test_reminders_peek_changes_nothing(tmp_path, monkeypatch):
     at = datetime(2026, 10, 5, 9, 0, tzinfo=reminders.tz(person)).astimezone(timezone.utc)
     peek = reminders.check(person, store, at, lambda *a: pytest.fail("peeking must not alert"), deliver=False)
     assert peek["today"][0]["status"] == "waiting" and peek["due"] == [] and not store.recent("reminders", "asha")
+
+
+def test_family_voice_note_round_trip(tmp_path, monkeypatch):
+    import hashlib
+    import hmac as hmac_
+
+    from starlette.testclient import TestClient
+
+    from kin import inbox, mcp_server, server
+
+    store = Store(tmp_path / "s.json")
+    monkeypatch.setattr(mcp_server, "store", store)
+    monkeypatch.setenv("KIN_WHATSAPP_APP_SECRET", "app-secret")
+    monkeypatch.setenv("KIN_API_TOKEN", "tok")
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata", language="Bengali")
+    mcp_server.add_family_contact("asha", "Ravi", "whatsapp", "+91 98765 43210", relation="son")
+
+    languages, sent = [], []
+    monkeypatch.setattr(inbox, "download_whatsapp_media", lambda media_id: (b"OggS-voice", "audio/ogg"))
+    monkeypatch.setattr(inbox, "transcribe", lambda audio, mime, language=None: languages.append(language) or "মা, রবিবার আসছি")
+    monkeypatch.setattr(server, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+    monkeypatch.setattr(mcp_server, "send_family_text", lambda contact, text: sent.append((contact["address"], text)))
+
+    payload = json.dumps({"entry": [{"changes": [{"value": {"messages": [
+        {"from": "919876543210", "type": "audio", "audio": {"id": "media-1", "voice": True}}]}}]}]}).encode()
+    sig = "sha256=" + hmac_.new(b"app-secret", payload, hashlib.sha256).hexdigest()
+    with TestClient(server.create_app()) as client:
+        assert client.post("/whatsapp", content=payload, headers={"X-Hub-Signature-256": sig}).status_code == 200
+        assert "voice note for Asha" in sent[-1][1] and languages == ["Bengali"]
+
+        # The device collects it once; peeking doesn't use it up.
+        assert len(mcp_server.family_messages("asha")) == 1
+        [note] = mcp_server.family_messages("asha", deliver=True)
+        assert (note["sender"], note["relation"], note["text"]) == ("Ravi", "son", "মা, রবিবার আসছি")
+        assert mcp_server.family_messages("asha", deliver=True) == []
+
+        # The audio is served to the device, behind the API token.
+        assert client.get(f"/voice-notes/{note['audio']}").status_code == 401
+        audio = client.get(f"/voice-notes/{note['audio']}", headers={"Authorization": "Bearer tok"})
+        assert audio.content == b"OggS-voice" and audio.headers["content-type"].startswith("audio/ogg")
+
+    # Asha answers; it goes back to Ravi.
+    assert mcp_server.reply_to_family("asha", "my son", "I'm fine, see you Sunday")["sent_to"] == "Ravi"
+    assert sent[-1] == ("+91 98765 43210", "💬 Asha says: I'm fine, see you Sunday")
+    with pytest.raises(ToolError, match="No family member"):
+        mcp_server.reply_to_family("asha", "Meera", "hello")
+
+
+def test_family_agent_passes_messages(tmp_path, monkeypatch):
+    from kin import family_agent, mcp_server
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    mcp_server.register_person("asha", "Asha", 1948, "Kolkata")
+    mcp_server.add_family_contact("asha", "Meera", "whatsapp", "+15550000002", relation="daughter")
+    people = family_agent.contacts_for(mcp_server.store, "whatsapp", "15550000002")
+    *_, pass_message = family_agent._scoped_tools(people, "whatsapp", "15550000002")
+    assert pass_message._tool_func("asha", "I'll call you tonight, Ma") == {"passed_on_to": "Asha"}
+    [note] = mcp_server.family_messages("asha")
+    assert (note["sender"], note["text"], note["audio"]) == ("Meera", "I'll call you tonight, Ma", None)

@@ -82,6 +82,19 @@ class Store:
     def add_row(self, table: str, person_id: str, **fields: Any) -> dict[str, Any]:
         return self._append(table, {"person_id": person_id, **fields})
 
+    # Small binary files (family voice notes), next to the JSON file.
+    def put_blob(self, key: str, data: bytes, mime: str) -> None:
+        folder = self.path.parent / "blobs"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / key.replace(":", "_")).write_bytes(data)
+        (folder / f"{key.replace(':', '_')}.type").write_text(mime)
+
+    def get_blob(self, key: str) -> tuple[bytes, str] | None:
+        file = self.path.parent / "blobs" / key.replace(":", "_")
+        if not file.exists():
+            return None
+        return file.read_bytes(), file.with_name(file.name + ".type").read_text()
+
     def today(self, table: str, person_id: str) -> list[dict[str, Any]]:
         today = date.today()
         return [r for r in self._read()[table] if r["person_id"] == person_id and local_date(r["at"]) == today]

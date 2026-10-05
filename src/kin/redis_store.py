@@ -12,6 +12,7 @@ or UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from datetime import date
@@ -22,6 +23,7 @@ import httpx
 from .store import _now, local_date
 
 CHAT_TTL = 6 * 3600
+BLOB_TTL = 7 * 24 * 3600
 
 
 def redis_configured() -> bool:
@@ -93,6 +95,17 @@ class RedisStore:
 
     def recent_traces(self, limit: int = 200) -> list[dict[str, Any]]:
         return self.recent("traces", "system", limit)
+
+    def put_blob(self, key: str, data: bytes, mime: str) -> None:
+        value = json.dumps({"mime": mime, "data": base64.b64encode(data).decode()})
+        self._cmd("SET", f"kin:blob:{key}", value, "EX", BLOB_TTL)
+
+    def get_blob(self, key: str) -> tuple[bytes, str] | None:
+        raw = self._cmd("GET", f"kin:blob:{key}")
+        if not raw:
+            return None
+        blob = json.loads(raw)
+        return base64.b64decode(blob["data"]), blob["mime"]
 
     # Agent conversation history, so serverless instances can pick up a chat.
     def load_chat(self, session: str) -> list[dict[str, Any]]:

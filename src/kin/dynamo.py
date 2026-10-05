@@ -85,6 +85,13 @@ class DynamoStore:
     def add_row(self, table: str, person_id: str, **fields: Any) -> dict[str, Any]:
         return self._append(table, {"person_id": person_id, **fields})
 
+    def put_blob(self, key: str, data: bytes, mime: str) -> None:
+        self.table.put_item(Item={"pk": f"BLOB#{key}", "sk": "blob", "data": data, "mime": mime})
+
+    def get_blob(self, key: str) -> tuple[bytes, str] | None:
+        item = self.table.get_item(Key={"pk": f"BLOB#{key}", "sk": "blob"}).get("Item")
+        return (bytes(item["data"]), item["mime"]) if item else None
+
     def add_alert(self, person_id: str, level: str, reason: str, at: str | None = None) -> dict[str, Any]:
         return self._append("alerts", {"person_id": person_id, "level": level, "reason": reason, "at": at})
 
