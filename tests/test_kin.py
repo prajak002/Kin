@@ -510,3 +510,35 @@ async def test_run_turn_reports_actions(tmp_path, monkeypatch):
 
     turn = await run_turn(StubAgent("Oh dear."), "I fell down", person_id="asha", raise_alert=lambda *a: None)
     assert turn.actions[-1]["kind"] == "alert"
+
+
+@pytest.mark.parametrize("text,hit", [
+    ("A man from the bank called and asked for my OTP", True),
+    ("They said my account will be blocked unless I update KYC", True),
+    ("বলল আমার ওটিপি লাগবে", True),
+    ("बैंक वाले बोले खाता बंद हो जाएगा", True),
+    ("A CBI officer said I'm under digital arrest", True),
+    ("I pinned Ravi's photo to the fridge", False),
+    ("My blood pressure tablet is in the kitchen", False),
+])
+def test_scam_detection(text, hit):
+    from kin.guardrails import scam_in
+
+    assert (scam_in(text) is not None) == hit
+
+
+async def test_scam_guardrail_alerts_family_once(tmp_path, monkeypatch):
+    from kin import mcp_server
+    from kin.turns import run_turn
+
+    monkeypatch.setattr(mcp_server, "store", Store(tmp_path / "s.json"))
+    alerts = []
+    turn = await run_turn(StubAgent("Don't share it."), "Someone wants my OTP", person_id="asha",
+                          raise_alert=lambda *a: alerts.append(a))
+    assert alerts[0][2] == "warning" and alerts[0][1].startswith("Possible scam")
+    assert turn.actions[-1]["kind"] == "scam"
+
+    # The model warned the family itself: no second alert.
+    await run_turn(StubAgent("Hang up.", [("alert_family", {"level": "warning", "reason": "Possible scam: OTP"})]),
+                   "Someone wants my OTP", person_id="asha", raise_alert=lambda *a: alerts.append(a))
+    assert len(alerts) == 1

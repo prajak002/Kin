@@ -87,7 +87,8 @@ async def run_turn(
     channel: str = "voice",
     raise_alert=None,
 ) -> Turn:
-    """Run one turn. raise_alert(person_id, reason) is the emergency fallback."""
+    """Run one turn. raise_alert(person_id, reason, level="urgent") is the
+    fallback when the model misses an emergency or a scam."""
     started = time.perf_counter()
     before = len(agent.messages)
     trace: dict[str, Any] = {
@@ -124,6 +125,16 @@ async def run_turn(
             reply = f"{reply} I've also let your family know right away.".strip()
         else:
             trace["guardrails"].append({"rule": "emergency", "action": "model_already_alerted", "matched": emergency})
+
+    if (scam := guardrails.scam_in(text)) is not None:
+        warned = any(c["name"] == "alert_family" and c["ok"] for c in calls)
+        if not warned and raise_alert is not None:
+            raise_alert(person_id, f"Possible scam: the person mentioned “{scam}”. Please call them and make sure they "
+                        "haven't shared an OTP, PIN or bank details, or sent money.", "warning")
+            trace["guardrails"].append({"rule": "scam", "action": "raised_warning_alert", "matched": scam})
+            actions.append({"kind": "scam", "text": "Scam shield: told the family to check in"})
+        else:
+            trace["guardrails"].append({"rule": "scam", "action": "model_already_alerted", "matched": scam})
 
     trace["latency_ms"] = round((time.perf_counter() - started) * 1000)
     trace["reply_chars"] = len(reply)

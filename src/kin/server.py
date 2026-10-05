@@ -63,13 +63,13 @@ async def invocations(request: Request) -> Response:
     else:
         agent = _agents.get(key) or _agents.setdefault(key, build_agent(person_id, tools=_tools, quiet=True))
     try:
-        turn = await run_turn(agent, prompt, person_id=person_id, channel=payload.get("channel", "voice"), raise_alert=_urgent)
+        turn = await run_turn(agent, prompt, person_id=person_id, channel=payload.get("channel", "voice"), raise_alert=_alert)
     except Exception:
         # The model call failed (rate limit, a malformed tool call). The turn is traced as an
         # error; the person hears an apology instead of silence. Emergencies still escalate.
         log.exception("agent turn failed")
         if guardrails.emergency_in(prompt):
-            _urgent(person_id, f"Possible emergency: the person said “{guardrails.emergency_in(prompt)}”. Please check on them now.")
+            _alert(person_id, f"Possible emergency: the person said “{guardrails.emergency_in(prompt)}”. Please check on them now.")
             return JSONResponse({"reply": "I didn't quite manage that, but I've let your family know right away. If you can, call emergency services."})
         return JSONResponse({"reply": "Sorry, I missed that. Could you say it again?"})
     if hasattr(store, "save_chat"):
@@ -77,10 +77,10 @@ async def invocations(request: Request) -> Response:
     return JSONResponse({"reply": turn.reply, "trace": turn.trace, "actions": turn.actions})
 
 
-def _urgent(person_id: str, reason: str) -> None:
-    """Emergency fallback used by the guardrail when the model didn't alert."""
+def _alert(person_id: str, reason: str, level: str = "urgent") -> None:
+    """Fallback used by the guardrails when the model didn't alert."""
     if person := mcp_server.store.get_person(person_id):
-        mcp_server.raise_alert(person, "urgent", reason)
+        mcp_server.raise_alert(person, level, reason)
 
 
 @server.custom_route("/traces", methods=["GET"])
